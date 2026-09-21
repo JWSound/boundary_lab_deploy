@@ -1,13 +1,20 @@
 const { app, BrowserWindow, dialog, ipcMain } = require("electron");
+const { resolveRuntime } = require("./runtime.cjs");
 const { DeployWorkerClient } = require("./workerClient.cjs");
 const { readFile, unlink, writeFile } = require("node:fs/promises");
 const { basename, dirname, isAbsolute, join, resolve } = require("node:path");
 const { performance } = require("node:perf_hooks");
 
+const packagedSmoke = process.argv.includes("--packaged-smoke");
+if (packagedSmoke) app.setPath("userData", process.env.DEPLOY_SMOKE_DATA || join(app.getPath("temp"), `deploy-packaged-smoke-${process.pid}`));
 const here = __dirname;
 const repositoryRoot = join(here, "../..");
 
-const deployWorker = new DeployWorkerClient(repositoryRoot);
+const libraryRoot = app.isPackaged ? join(process.resourcesPath, "library") : join(here, "../library");
+const deployWorker = new DeployWorkerClient(() => resolveRuntime({
+  packaged: app.isPackaged, resourcesPath: process.resourcesPath,
+  dataPath: app.getPath("userData"), repositoryRoot,
+}));
 
 function createWindow() {
   const level2Smoke = process.argv.includes("--smoke-level2");
@@ -19,7 +26,7 @@ function createWindow() {
     minWidth: 1100,
     minHeight: 720,
     backgroundColor: "#101311",
-    show: !smokeTest || benchmarkLevel2,
+    show: !packagedSmoke && (!smokeTest || benchmarkLevel2),
     titleBarStyle: "hiddenInset",
     autoHideMenuBar: true,
     webPreferences: {
@@ -30,6 +37,29 @@ function createWindow() {
       backgroundThrottling: !benchmarkLevel2,
     },
   });
+
+  if (packagedSmoke) {
+    window.webContents.once("did-finish-load", async () => {
+      try {
+        await deployWorker.ensureStarted();
+        const state = await window.webContents.executeJavaScript(`new Promise((resolve, reject) => {
+          const deadline = Date.now() + 30000;
+          const check = () => {
+            const source = document.querySelector('.package-card')?.textContent || '';
+            if (source.includes('S218BP')) return resolve({ title: document.title, canvas: Boolean(document.querySelector('canvas')), package: source });
+            if (Date.now() > deadline) return reject(new Error('Bundled example did not load'));
+            setTimeout(check, 100);
+          }; check();
+        })`);
+        if (!app.isPackaged || !state.canvas) throw new Error('Packaged renderer did not initialize');
+        const report = JSON.stringify({ packaged: true, workerReady: true, ...state });
+        await writeFile(join(app.getPath("userData"), "packaged-smoke.json"), report);
+        console.log(report);
+        app.quit();
+      } catch (error) { console.error(error); app.exit(1); }
+    });
+    setTimeout(() => app.exit(1), 60000).unref();
+  }
 
   if (smokeTest) {
     const consoleErrors = [];
@@ -54,7 +84,7 @@ function createWindow() {
         const smokeProjectPath = join(app.getPath("temp"), `boundary-lab-deploy-${process.pid}.blabdeploy.json`);
         // Fixture IDs are hashes of bytes; line endings can change across checkouts.
         let rigidHash = 2166136261;
-        for (const byte of await readFile(join(here, "../library/RigidStage_LOD.msh"))) {
+        for (const byte of await readFile(join(libraryRoot, "RigidStage_LOD.msh"))) {
           rigidHash = Math.imul(rigidHash ^ byte, 16777619);
         }
         const smokeRigidId = `rigid-mesh-${(rigidHash >>> 0).toString(16)}`;
@@ -65,12 +95,12 @@ function createWindow() {
           packages: [{
             id: bundledPackageId,
             name: "S218BP",
-            source_file: join(here, "../library/S218BP_LOD.blabsp"),
+            source_file: join(libraryRoot, "S218BP_LOD.blabsp"),
           }],
           rigid_meshes: [{
             id: smokeRigidId,
             name: "RigidStage_LOD",
-            source_file: join(here, "../library/RigidStage_LOD.msh"),
+            source_file: join(libraryRoot, "RigidStage_LOD.msh"),
             scale_to_meters: 0.001,
           }],
           sources: [
@@ -115,7 +145,7 @@ function createWindow() {
       }
       if (!benchmarkLevel2 && !level2Smoke) {
         const alternatePackagePath = join(app.getPath("temp"), `S218BP_ALT_${process.pid}.blabsp`);
-        await writeFile(alternatePackagePath, await readFile(join(here, "../library/S218BP_LOD.blabsp")));
+        await writeFile(alternatePackagePath, await readFile(join(libraryRoot, "S218BP_LOD.blabsp")));
         const showOpenDialog = dialog.showOpenDialog;
         dialog.showOpenDialog = async (options) => options?.title === "Open Boundary Lab speaker package"
           ? { canceled: false, filePaths: [alternatePackagePath] }
@@ -165,7 +195,7 @@ function createWindow() {
         })`);
       }
       if (!benchmarkLevel2) {
-        const rigidMeshPath = join(here, "../library/RigidStage_LOD.msh");
+        const rigidMeshPath = join(libraryRoot, "RigidStage_LOD.msh");
         const showOpenDialog = dialog.showOpenDialog;
         dialog.showOpenDialog = async (options) => options?.title === "Import rigid boundary mesh"
           ? { canceled: false, filePaths: [rigidMeshPath] }
@@ -663,7 +693,7 @@ async function readPackageSelection(path) {
 }
 
 ipcMain.handle("deploy:load-bundled-example", async () => {
-  const path = join(here, "../library/S218BP_LOD.blabsp");
+  const path = join(libraryRoot, "S218BP_LOD.blabsp");
   try {
     return await readPackageSelection(path);
   } catch {
@@ -722,7 +752,7 @@ ipcMain.handle("deploy:open-project", async () => {
     const sourceFile = typeof reference?.source_file === "string" ? reference.source_file : null;
     const candidates = sourceFile ? [
       isAbsolute(sourceFile) ? sourceFile : resolve(dirname(projectPath), sourceFile),
-      join(here, "../library", basename(sourceFile)),
+      join(libraryRoot, basename(sourceFile)),
     ] : [];
     let packageResult = null;
     for (const candidate of [...new Set(candidates)]) {
@@ -754,7 +784,7 @@ ipcMain.handle("deploy:open-project", async () => {
     const sourceFile = typeof reference?.source_file === "string" ? reference.source_file : null;
     const candidates = sourceFile ? [
       isAbsolute(sourceFile) ? sourceFile : resolve(dirname(projectPath), sourceFile),
-      join(here, "../library", basename(sourceFile)),
+      join(libraryRoot, basename(sourceFile)),
     ] : [];
     let meshResult = null;
     for (const candidate of [...new Set(candidates)]) {
@@ -803,7 +833,7 @@ ipcMain.handle("deploy:cancel-microphone-sweep", async () => deployWorker.cancel
 
 app.whenReady().then(() => {
   createWindow();
-  void deployWorker.warmup().catch((error) => console.error("Deploy worker warmup failed", error));
+  if (!packagedSmoke) void deployWorker.warmup().catch((error) => console.error("Deploy worker warmup failed", error));
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

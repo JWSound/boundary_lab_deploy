@@ -15,13 +15,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--backend', choices=['cpu', 'cuda'], default='cuda')
     parser.add_argument('--output', type=Path, default=Path('runs/standalone-mixed-smoke'))
+    parser.add_argument("--library", type=Path)
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
+    library = args.library or root / "desktop/library"
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     payload = {
-        'packagePaths': {'a': str(root / 'desktop/library/S218BP_LOD.blabsp'),
-                         'b': str(root / 'desktop/library/SKHORN.blabsp')},
+        'packagePaths': {'a': str(library / 'S218BP_LOD.blabsp'),
+                         'b': str(library / 'SKHORN.blabsp')},
         'sources': [dict(id='cabinet-' + key, packageId=key, positionX=x, positionHeightM=1.0,
                          positionZ=0.0, yawDeg=0.0, pitchDeg=0.0, rollDeg=0.0,
                          levelDb=0.0, delayMs=0.0, polarity=1) for key, x in [('a', -2.0), ('b', 2.0)]],

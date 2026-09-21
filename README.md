@@ -60,3 +60,5 @@ milestone; this repository currently supports source installation.
 
 For an opt-in numerical check, run `.\.venv\Scripts\python.exe scripts/smoke_solver.py --backend cuda`.
 This validates two different bundled packages at one common frequency and two pressure probes.
+
+Windows bundle and installer instructions: [distribution guide](docs/distribution.md).

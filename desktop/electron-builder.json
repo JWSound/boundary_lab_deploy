@@ -1,0 +1,47 @@
+{
+  "appId": "org.boundarylab.deploy",
+  "productName": "Boundary Lab Deploy",
+  "copyright": "Copyright Boundary Lab contributors",
+  "directories": {
+    "output": "../release"
+  },
+  "files": [
+    "dist/**/*",
+    "electron/**/*",
+    "package.json",
+    "!node_modules/**/*"
+  ],
+  "extraResources": [
+    {
+      "from": "../build/resources",
+      "to": ".",
+      "filter": [
+        "**/*"
+      ]
+    }
+  ],
+  "asar": true,
+  "npmRebuild": false,
+  "beforePack": "./electron/packaging-check.cjs",
+  "forceCodeSigning": true,
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": [
+          "x64"
+        ]
+      }
+    ],
+    "artifactName": "Boundary-Lab-Deploy-${version}-win-${arch}.${ext}"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "deleteAppDataOnUninstall": false,
+    "runAfterFinish": false,
+    "license": "../LICENSE"
+  },
+  "publish": null
+}

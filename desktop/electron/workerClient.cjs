@@ -1,9 +1,10 @@
+const { appendFileSync, existsSync, statSync, renameSync, rmSync } = require("node:fs");
 const { spawn } = require("node:child_process");
 const { performance } = require("node:perf_hooks");
 
 class DeployWorkerClient {
-  constructor(repositoryRoot) {
-    this.repositoryRoot = repositoryRoot;
+  constructor(runtimeOptions) {
+    this.runtimeOptions = runtimeOptions;
     this.process = null;
     this.stdoutBuffer = "";
     this.pending = new Map();
@@ -16,10 +17,15 @@ class DeployWorkerClient {
 
   ensureStarted() {
     if (this.process && this.readyPromise) return this.readyPromise;
-    const python = process.env.DEPLOY_PYTHON_EXE || process.env.BLAB_PYTHON_EXE || "python";
-    this.process = spawn(python, ["-m", "boundary_deploy.worker"], {
-      cwd: this.repositoryRoot,
-      env: { ...process.env },
+    const runtime = this.runtimeOptions();
+    if (runtime.logFile && existsSync(runtime.logFile) && statSync(runtime.logFile).size > 5 * 1024 * 1024) {
+      const previous = runtime.logFile + ".previous";
+      rmSync(previous, { force: true });
+      renameSync(runtime.logFile, previous);
+    }
+    this.process = spawn(runtime.python, ["-I", "-B", "-X", "utf8", "-m", "boundary_deploy.worker"], {
+      cwd: runtime.cwd,
+      env: runtime.env,
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -32,7 +38,10 @@ class DeployWorkerClient {
     this.process.stderr.setEncoding("utf8");
     this.process.stderr.on("data", (chunk) => {
       const message = chunk.trim();
-      if (message) console.error(`Deploy solve worker: ${message}`);
+      if (message) {
+        console.error(`Deploy solve worker: ${message}`);
+        if (runtime.logFile) appendFileSync(runtime.logFile, `${new Date().toISOString()} ${message}\n`);
+      }
     });
     this.process.once("error", (error) => this.handleExit(error));
     this.process.once("exit", (code) => this.handleExit(new Error(`Deploy solve worker exited with code ${code}.`)));
