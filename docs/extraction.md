@@ -1,8 +1,9 @@
 # Repository extraction
 
 Copied from Boundary Lab commit 28f6f1d2372481c55bc5f0af3e01b90b5cb7ffba.
-The original repository is preserved during migration. This is a fresh local repository,
-not a history rewrite; LICENSE and original source attribution are retained.
+The extraction used a fresh repository rather than rewriting history. LICENSE and
+original source attribution are retained; the former copy remains in Boundary Lab
+Git history after cleanup.
 
 - `deploy/` becomes `desktop/`.
 - `src/blab/deploy/` becomes `src/boundary_deploy/`.
@@ -10,8 +11,9 @@ not a history rewrite; LICENSE and original source attribution are retained.
 - The worker calls BEAT Engine directly. It owns and terminates its own workers.
 - `.blabsp` schema 1 and `.blabdeploy.json` remain unchanged; exporters remain in Boundary Lab.
 - Optional viewport assets remain display-only. Acoustic mesh and ROM payloads are unchanged.
-- Authoring/ROM-training research scripts remain in Boundary Lab for now. Historical desktop
-  benchmarks are retained as records, not portable executable test fixtures.
+- Offline package benchmark/ROM research scripts now live here; see [developer tools](developer-tools.md).
+  Project-to-package export stays in Boundary Lab. Historical desktop benchmarks
+  are retained as records, not portable executable test fixtures.
 
 The standalone repository is now published at
 https://github.com/JWSound/boundary_lab_deploy. Python/Julia bundling, installer
