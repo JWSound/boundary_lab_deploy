@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "boundary-lab-deploy"
+version = "0.1.0"
+description = "Standalone loudspeaker deployment and BEAT Engine solve service"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {file = "LICENSE"}
+dependencies = [
+  "beat-engine @ git+https://github.com/JWSound/BEAT_Engine.git@6f2883e3a5d9cd5e6e275e172c0e605207d945e1",
+  "numpy", "meshio",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff>=0.15,<0.16", "build"]
+
+[project.scripts]
+boundary-deploy-worker = "boundary_deploy.worker:main"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/boundary_deploy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = ["E501"]
