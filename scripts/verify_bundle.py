@@ -10,6 +10,8 @@ import subprocess
 import uuid
 from pathlib import Path
 
+from build_runtime import validate_cuda_inventory
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -26,6 +28,7 @@ def main():
             parser.error("Relocation destination must not already exist.")
         shutil.copytree(args.resources, destination)
     manifest = json.loads((destination / "runtime-manifest.json").read_text())
+    validate_cuda_inventory(manifest["files"])
     user = destination.parent / "Test User Data"
     user.mkdir(exist_ok=True)
     temp = user / "tmp"

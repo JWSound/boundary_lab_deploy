@@ -99,3 +99,19 @@ It does not remove user projects or settings.
 Installer: `release/Boundary-Lab-Deploy-0.1.0-win-x64.exe` (1,594,778,560 bytes), unsigned.
 SHA-256: `804242eb336aec9682c0c58ed2c2830ecb9c8530a560d61814542252523615b4`.
 The same checksum is recorded in `release/SHA256SUMS.txt`.
+
+
+## Qualification of hosted candidates
+
+A GPU-less Windows build must register CUDA_Runtime_jll and CUDA_Compiler_jll in
+its bundled Julia Project.toml extras and set both version preferences before
+artifact selection. An app-ready check alone does not detect missing lazy CUDA
+artifacts. The builder and relocation verifier now reject missing CUDA runtime,
+compiler, BLAS, sparse, solver and CUDSS libraries. Candidate rc1 failed this
+inventory qualification and is superseded by rc2; never promote rc1.
+
+After downloading a candidate, verify SHA256SUMS.txt, install or extract it into a
+fresh test location, and run `verify_bundle.py --in-place --solve` against its
+resources on trusted NVIDIA hardware. This uses the bundled Python/Julia with an
+isolated depot and disabled package downloads. Record its residual and runtime ID
+before promoting a signed final build.

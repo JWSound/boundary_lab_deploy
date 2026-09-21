@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "boundary-lab-deploy"
-version = "0.1.0rc1"
+version = "0.1.0rc2"
 description = "Standalone loudspeaker deployment and BEAT Engine solve service"
 readme = "README.md"
 requires-python = ">=3.11"
