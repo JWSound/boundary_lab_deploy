@@ -58,3 +58,5 @@ runtime relocation and actual installation, launch and uninstall on Windows.
 Run the offline coupled-solve qualification on trusted NVIDIA hardware against
 the installed resources before publishing. The hosted runner does not validate
 CUDA numerical execution. Record its runtime ID, hashes and solve residual.
+
+Offline benchmark and ROM utilities are documented in [developer tools](developer-tools.md).
