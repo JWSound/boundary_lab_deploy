@@ -1,0 +1,113 @@
+name: Desktop candidate
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tested main tag (vX.Y.Z or vX.Y.ZrcN)
+        required: true
+      signed:
+        description: Sign and create a draft release (requires release environment secrets)
+        type: boolean
+        default: false
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: desktop-${{ inputs.tag }}
+  cancel-in-progress: false
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    environment: ${{ inputs.signed && 'release' || 'desktop-test' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Validate metadata and exact commit CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          python scripts/release_tools.py check $env:RELEASE_TAG
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python scripts/release_tools.py require-ci checks.yml
+      - name: Check signing configuration before building
+        if: inputs.signed
+        env:
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: |
+          if (-not $env:CSC_LINK -or -not $env:CSC_KEY_PASSWORD) {
+            throw 'Configure WIN_CSC_LINK and WIN_CSC_KEY_PASSWORD in the release environment first.'
+          }
+      - run: python scripts/build_runtime.py
+      - run: python scripts/verify_bundle.py --resources build/resources --destination "build/Relocated Runtime/resources"
+      - name: Keep relocation evidence and free the verified copy
+        run: |
+          Copy-Item "build/Relocated Runtime/Test User Data/verification.json" build/verification.json
+          $verified = (Resolve-Path -LiteralPath "build/Relocated Runtime").Path
+          $buildRoot = (Resolve-Path -LiteralPath build).Path + [IO.Path]::DirectorySeparatorChar
+          if (-not $verified.StartsWith($buildRoot, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Relocation cleanup escaped the build directory.'
+          }
+          Remove-Item -LiteralPath $verified -Recurse -Force
+      - run: npm ci
+        working-directory: desktop
+      - name: Build unsigned test installer
+        if: ${{ !inputs.signed }}
+        run: npm run dist:win:unsigned
+        working-directory: desktop
+      - name: Build signed release installer
+        if: inputs.signed
+        env:
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: npm run dist:win
+        working-directory: desktop
+      - name: Verify signed installer
+        if: inputs.signed
+        run: |
+          $installer = Get-ChildItem release/Boundary-Lab-Deploy-*-win-x64.exe
+          if ((Get-AuthenticodeSignature -LiteralPath $installer.FullName).Status -ne 'Valid') {
+            throw 'Installer signature is not valid.'
+          }
+      - name: Test actual installation, launch and uninstall
+        run: |
+          $installer = Get-ChildItem release/Boundary-Lab-Deploy-*-win-x64.exe
+          ./scripts/test_installer.ps1 -Installer $installer.FullName
+      - name: Assemble candidate artifacts
+        run: |
+          New-Item -ItemType Directory -Path candidate | Out-Null
+          Move-Item release/Boundary-Lab-Deploy-*-win-x64.exe candidate/
+          Copy-Item build/resources/runtime-manifest.json candidate/
+          Copy-Item build/verification.json candidate/
+          Copy-Item "build/Installed Smoke Data/packaged-smoke.json" candidate/
+          python scripts/release_tools.py checksums candidate
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deploy-${{ inputs.tag }}-${{ inputs.signed && 'signed' || 'unsigned-test' }}
+          path: candidate/*
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: error
+      - name: Create signed draft release
+        if: inputs.signed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          $extra = @()
+          if ($env:RELEASE_TAG -match 'rc\d+$') { $extra += '--prerelease' }
+          $version = $env:RELEASE_TAG.Substring(1)
+          $assets = (Get-ChildItem candidate -File).FullName
+          gh release create $env:RELEASE_TAG @assets --verify-tag --draft @extra --title $env:RELEASE_TAG --notes-file "docs/releases/$version.md"

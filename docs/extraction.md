@@ -13,16 +13,17 @@ not a history rewrite; LICENSE and original source attribution are retained.
 - Authoring/ROM-training research scripts remain in Boundary Lab for now. Historical desktop
   benchmarks are retained as records, not portable executable test fixtures.
 
-Next release milestones: package/provision Python and
-Julia, installer resource paths and writable cache locations, signed release builds, and move
-ongoing Deploy development here after compatibility is accepted. No remote has been created.
+The standalone repository is now published at
+https://github.com/JWSound/boundary_lab_deploy. Python/Julia bundling, installer
+resource paths and per-user caches are implemented; see [distribution](distribution.md).
+Ongoing Deploy work belongs here. Signing remains to be configured.
 
 ## Engine compatibility
 
-Published BEAT 0.1.4 accepts Deploy schemas 1 and 2 only. Mixed-package Coupled
-requires schema 3. The dependency is therefore pinned to public BEAT commit `6f2883e3a5d9cd5e6e275e172c0e605207d945e1`
-rather than an editable local checkout or an incompatible release. Its Python version
-metadata still reads 0.1.4; record the commit as well when reproducing results.
+At extraction, mixed-package Coupled required a commit pin because published BEAT
+0.1.4 supported deployment schemas 1 and 2 only. BEAT 0.2.0 adds schema 3 and is
+now the released dependency, pinned by wheel URL and SHA-256. Existing schemas
+remain supported. Both application and runtime packaging pins must match.
 
 ## Local verification (2026-09-21)
 

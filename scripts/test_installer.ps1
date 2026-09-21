@@ -1,8 +1,12 @@
 param(
-    [string]$Installer = (Join-Path (Split-Path -Parent $PSScriptRoot) "release/Boundary-Lab-Deploy-0.1.0-win-x64.exe")
+    [string]$Installer = ""
 )
 $ErrorActionPreference = "Stop"
 $deployRoot = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
+if (-not $Installer) {
+    $version = (Get-Content -LiteralPath (Join-Path $deployRoot "desktop/package.json") -Raw | ConvertFrom-Json).version
+    $Installer = Join-Path $deployRoot "release/Boundary-Lab-Deploy-$version-win-x64.exe"
+}
 $testRoot = [IO.Path]::GetFullPath((Join-Path $deployRoot "build/installer-test"))
 if (-not $testRoot.StartsWith((Join-Path $deployRoot "build") + [IO.Path]::DirectorySeparatorChar)) {
     throw "Installer test directory escaped the build directory."

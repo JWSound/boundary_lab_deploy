@@ -32,3 +32,36 @@ test("development keeps explicit executable selection", () => {
   assert.equal(config.python, "chosen-python");
   assert.equal(config.cwd, "repo");
 });
+const packagingCheck = require("../electron/packaging-check.cjs");
+
+test("packaging rejects a stale runtime or mismatched application wheel", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "deploy-packaging-"));
+  const projectDir = path.join(root, "desktop");
+  const resources = path.join(root, "build/resources");
+  try {
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.mkdirSync(resources, { recursive: true });
+    fs.mkdirSync(path.join(root, "packaging"));
+    const lock = { beat_requirement: "released-engine", python: { version: "3.13" } };
+    fs.writeFileSync(path.join(root, "packaging/runtime-lock.json"), JSON.stringify(lock));
+    fs.writeFileSync(path.join(projectDir, "package.json"), JSON.stringify({ version: "0.1.0" }));
+    fs.writeFileSync(path.join(resources, "payload"), "runtime");
+    const manifest = { schema_version: 1, files: { payload: "hash" }, components: lock,
+      wheels: { "boundary_lab_deploy-0.1.0-py3-none-any.whl": "hash" } };
+    const write = () => fs.writeFileSync(path.join(resources, "runtime-manifest.json"), JSON.stringify(manifest));
+    const context = { packager: { projectDir } };
+    write();
+    await packagingCheck(context);
+    assert.equal(context.packager.createTransformerForExtraFiles(), null);
+    manifest.components = { ...lock, beat_requirement: "old-engine" };
+    write();
+    await assert.rejects(packagingCheck(context), /runtime is stale/);
+    manifest.components = lock;
+    manifest.wheels = { "boundary_lab_deploy-0.0.1-py3-none-any.whl": "hash" };
+    write();
+    await assert.rejects(packagingCheck(context), /wheel version differs/);
+  } finally {
+    assert.equal(path.dirname(root), path.resolve(os.tmpdir()));
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

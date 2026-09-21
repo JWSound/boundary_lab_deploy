@@ -31,15 +31,13 @@ After setup, `powershell -File scripts/start.ps1` launches the standalone app.
 
 No `PYTHONPATH` injection or Boundary Lab checkout is required.
 
-The declared BEAT dependency is pinned to commit `6f2883e3a5d9cd5e6e275e172c0e605207d945e1`.
-Published BEAT 0.1.4 lacks mixed-package schema 3 support; this commit includes it.
-Use a fresh virtual environment: pip can retain the older 0.1.4 wheel when changing
-to this commit because both share version metadata. If upgrading an existing environment,
-force-reinstall the exact `beat-engine` dependency declared in `pyproject.toml`.
+The BEAT dependency is pinned to a published wheel and SHA-256 in `pyproject.toml`.
+The bundled runtime uses the same pin in `packaging/runtime-lock.json`. BEAT 0.2.0
+includes the mixed-package schema 3 support required for Coupled solves.
 
-Git is required to install this interim dependency. Replace the pin with the next verified release. Development against a different
-engine checkout must be explicit, e.g. `python -m pip install -e E:/Code/BEAT_Engine` inside
-this environment; such results do not certify the pinned dependency.
+Development against a candidate engine must be explicit and use a unique version
+in a separate virtual environment. Such results do not certify the released pin.
+Restore the declared dependency before validating a release build.
 
 ## Verification
 
@@ -62,3 +60,8 @@ For an opt-in numerical check, run `.\.venv\Scripts\python.exe scripts/smoke_sol
 This validates two different bundled packages at one common frequency and two pressure probes.
 
 Windows bundle and installer instructions: [distribution guide](docs/distribution.md).
+
+## Contributing and releases
+
+Use scoped PRs targeting `main`. See [contributing](CONTRIBUTING.md) and the
+[release process](docs/development.md). Stable releases are independent of main.
