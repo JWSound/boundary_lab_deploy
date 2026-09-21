@@ -1,4 +1,5 @@
 """Assemble immutable Windows runtime resources; never copy a developer venv or depot."""
+
 from __future__ import annotations
 
 import argparse
@@ -39,6 +40,19 @@ def run(*args, **kwargs):
     subprocess.run([str(a) for a in args], check=True, **kwargs)
 
 
+def validate_cuda_inventory(files):
+    """A worker-ready check cannot detect lazy CUDA artifacts missing on a CPU host."""
+    names = {Path(name).name.lower() for name in files}
+    required = ("cublas64_", "cublaslt64_", "cudart64_", "cusolver64_", "cusparse64_", "cudss64_", "nvjitlink")
+    missing = [
+        prefix for prefix in required if not any(name.startswith(prefix) and name.endswith(".dll") for name in names)
+    ]
+    if "ptxas.exe" not in names:
+        missing.append("ptxas.exe")
+    if missing:
+        raise RuntimeError("Incomplete CUDA runtime bundle: missing " + ", ".join(missing))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=ROOT / "build/resources")
@@ -70,31 +84,63 @@ def main():
     wheels = ROOT / "build/wheels" / uuid.uuid4().hex[:12]
     wheels.mkdir(parents=True, exist_ok=True)
     run(sys.executable, "-m", "pip", "wheel", "--no-deps", "--wheel-dir", wheels, ROOT, lock["beat_requirement"])
-    run(sys.executable, "-m", "pip", "download", "--only-binary=:all:", "--dest", wheels,
-        "-r", ROOT / "packaging/requirements-win.txt")
+    run(
+        sys.executable,
+        "-m",
+        "pip",
+        "download",
+        "--only-binary=:all:",
+        "--dest",
+        wheels,
+        "-r",
+        ROOT / "packaging/requirements-win.txt",
+    )
     site = python / "Lib/site-packages"
-    run(sys.executable, "-m", "pip", "install", "--no-index", "--no-deps", "--no-compile", "--upgrade", "--target", site,
-        *sorted(wheels.glob("*.whl")))
+    run(
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--no-index",
+        "--no-deps",
+        "--no-compile",
+        "--upgrade",
+        "--target",
+        site,
+        *sorted(wheels.glob("*.whl")),
+    )
     # Explicit isolated sys.path; no registry, PYTHONPATH, user site or pip at runtime.
     (python / "python313._pth").write_text("python313.zip\n.\nLib/site-packages\n", encoding="utf-8")
     engine = site / "beat_engine"
-    # Fix the toolkit choice so installation never selects a different lazy artifact.
-    (engine / "julia_cuda/LocalPreferences.toml").write_text(
-        '[CUDA_Runtime_jll]\nversion = "' + lock["cuda_runtime"] + '"\n', encoding="utf-8")
-    environment = {key: value for key, value in os.environ.items()
-                   if not key.upper().startswith(("JULIA_PROJECT", "JULIA_LOAD_PATH", "JULIA_CUDA", "BLAB_"))}
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.upper().startswith(("JULIA_PROJECT", "JULIA_LOAD_PATH", "JULIA_CUDA", "BLAB_"))
+    }
     environment.update(JULIA_PKG_PRECOMPILE_AUTO="0", JULIA_CPU_TARGET="generic", JULIA_LOAD_PATH="@;@stdlib")
-    run(julia / "bin/julia.exe", "--startup-file=no", ROOT / "packaging/stage_depot.jl",
-        runtime / "julia-depot", engine / "julia_local", engine / "julia_cuda", env=environment)
+    run(
+        julia / "bin/julia.exe",
+        "--startup-file=no",
+        ROOT / "packaging/stage_depot.jl",
+        runtime / "julia-depot",
+        lock["cuda_runtime"],
+        engine / "julia_local",
+        engine / "julia_cuda",
+        env=environment,
+    )
     shutil.copytree(ROOT / "desktop/library", output / "library", dirs_exist_ok=True)
     shutil.copy2(ROOT / "LICENSE", output / "LICENSE")
     # Full inventory also makes installed-resource mutation detectable in relocation tests.
-    files = {str(p.relative_to(output)).replace("\\", "/"): digest(p)
-             for p in sorted(output.rglob("*")) if p.is_file()}
+    files = {str(p.relative_to(output)).replace("\\", "/"): digest(p) for p in sorted(output.rglob("*")) if p.is_file()}
+    validate_cuda_inventory(files)
     identity = hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()[:16]
-    manifest = {"schema_version": 1, "runtime_id": "win-x64-" + identity,
-                "components": lock, "files": files,
-                "wheels": {p.name: digest(p) for p in sorted(wheels.glob("*.whl"))}}
+    manifest = {
+        "schema_version": 1,
+        "runtime_id": "win-x64-" + identity,
+        "components": lock,
+        "files": files,
+        "wheels": {p.name: digest(p) for p in sorted(wheels.glob("*.whl"))},
+    }
     complete.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print("Runtime complete:", output, flush=True)
 

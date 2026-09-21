@@ -10,6 +10,8 @@ import subprocess
 import uuid
 from pathlib import Path
 
+from build_runtime import validate_cuda_inventory
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -26,6 +28,15 @@ def main():
             parser.error("Relocation destination must not already exist.")
         shutil.copytree(args.resources, destination)
     manifest = json.loads((destination / "runtime-manifest.json").read_text())
+    validate_cuda_inventory(manifest["files"])
+    expected_files = dict(manifest["files"])
+    # Electron adds these files around the independently staged runtime. Snapshot
+    # their hashes too when qualifying resources extracted from an actual installer.
+    for name in ("app.asar", "elevate.exe", "app-update.yml"):
+        extra = destination / name
+        if name not in expected_files and extra.is_file():
+            with extra.open("rb") as stream:
+                expected_files[name] = hashlib.file_digest(stream, "sha256").hexdigest()
     user = destination.parent / "Test User Data"
     user.mkdir(exist_ok=True)
     temp = user / "tmp"
@@ -49,12 +60,12 @@ def main():
     if args.solve:
         subprocess.run([python, "-I", "-B", "-X", "utf8", ROOT / "scripts/smoke_solver.py", "--library", destination / "library",
                         "--output", user / ("solve-" + uuid.uuid4().hex[:8])], env=environment, cwd=user, check=True, timeout=900)
-    for name, expected in manifest["files"].items():
+    for name, expected in expected_files.items():
         with (destination / name).open("rb") as stream:
             actual = hashlib.file_digest(stream, "sha256").hexdigest()
         if actual != expected:
             raise RuntimeError(f"Installed resource was modified: {name}")
-    unexpected = {str(p.relative_to(destination)).replace("\\", "/") for p in destination.rglob("*") if p.is_file()} - set(manifest["files"]) - {"runtime-manifest.json"}
+    unexpected = {str(p.relative_to(destination)).replace("\\", "/") for p in destination.rglob("*") if p.is_file()} - set(expected_files) - {"runtime-manifest.json"}
     if unexpected:
         raise RuntimeError(f"Runtime created files in its installation: {sorted(unexpected)[:10]}")
     report = {"worker_ready": True, "solve": args.solve, "resources_unchanged": True,

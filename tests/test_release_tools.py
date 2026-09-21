@@ -59,3 +59,26 @@ def test_engine_manifest_version_must_match(release):
     contract.write_text('{"engine":{"version":"0.0.0"}}')
     with pytest.raises(ValueError, match="manifest version"):
         functions["check"]("v1.2.3")
+
+
+def test_cuda_inventory_rejects_a_worker_ready_but_gpu_incomplete_bundle():
+    functions = runpy.run_path(str(Path(__file__).resolve().parents[1] / "scripts/build_runtime.py"))
+    check = functions["validate_cuda_inventory"]
+    with pytest.raises(RuntimeError, match="Incomplete CUDA"):
+        check(["runtime/python/python.exe", "runtime/julia/bin/julia.exe"])
+    complete = [
+        "bin/" + name
+        for name in [
+            "cublas64_13.dll",
+            "cublasLt64_13.dll",
+            "cudart64_13.dll",
+            "cusolver64_12.dll",
+            "cusparse64_12.dll",
+            "nvJitLink_130_0.dll",
+            "cudss64_0.dll",
+            "ptxas.exe",
+        ]
+    ]
+    check(complete)
+    with pytest.raises(RuntimeError, match="ptxas"):
+        check(complete[:-1])
