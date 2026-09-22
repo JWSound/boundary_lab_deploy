@@ -302,6 +302,7 @@ unsupportedProject.schema_version = 1;
 assert.throws(() => parseDeployProject(JSON.stringify(unsupportedProject)), /Unsupported.*version 1/);
 const legacyProject = JSON.parse(projectText);
 legacyProject.schema_version = 5;
+delete legacyProject.heatmap_scale;
 legacyProject.observation_plane = legacyProject.audience_planes[0];
 delete legacyProject.audience_planes;
 delete legacyProject.observation_plane.displayMode;

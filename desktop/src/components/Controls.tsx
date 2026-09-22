@@ -454,7 +454,7 @@ export function PlaneResolutionInspector({
         </label>
       </div>
       {value.displayMode === "spl" ? <>
-        <SectionHeader icon={Palette} title="Heatmap" />
+        <SectionHeader icon={Palette} title="Heatmap (all planes)" />
         <div className="inspector-section">
           <div className="two-column-fields">
             <NumberField label="Scale minimum" value={value.heatmapMinimumDb} unit="dB" step={1} maximum={value.heatmapMaximumDb - 1} onChange={(next) => set("heatmapMinimumDb", next)} />
@@ -463,7 +463,7 @@ export function PlaneResolutionInspector({
           <Slider label="Banding" value={value.heatmapBandingDb} minimum={0} maximum={12} step={1} unit=" dB" onChange={(next) => set("heatmapBandingDb", next)} />
         </div>
       </> : <>
-        <SectionHeader icon={Palette} title="Pressure" />
+        <SectionHeader icon={Palette} title="Pressure (shared scale)" />
         <div className="inspector-section">
           <Slider label="Scale" value={value.pressureScalePa} minimum={1} maximum={100} step={1} unit=" Pa" onChange={(next) => set("pressureScalePa", next)} />
           <label className="control-row toggle-row">

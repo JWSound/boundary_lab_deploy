@@ -32,12 +32,12 @@ export function ProjectsScreen({ onStart }: { onStart: (start: ProjectStart) => 
   return <main className="projects-screen">
     <header className="projects-brand"><div className="brand-mark"><Waves size={24} /></div><div><strong>Boundary Lab</strong><span>DEPLOY</span></div></header>
     <section className="projects-content">
-      <div className="projects-heading"><div><p className="projects-eyebrow">YOUR WORKSPACE</p><h1>Projects</h1><p>Start a new scene or continue where you left off.</p></div>
+      <div className="projects-heading"><div><h1>Projects</h1></div>
         <div className="projects-actions"><button className="secondary-button" disabled={opening || !window.boundaryLabDesktop} onClick={() => void open()}><FolderOpen size={16} />Open project</button>
           <button className="primary-button" disabled={opening} onClick={() => onStart({ kind: "new" })}><Plus size={16} />New</button></div>
       </div>
       {error && <p className="projects-error" role="alert">{error}</p>}
-      <section className="recent-projects" aria-label="Recent projects"><div className="projects-section-title"><h2>Recent projects</h2><span>{recent.length}</span></div>
+      <section className="recent-projects" aria-label="Recent projects"><div className="projects-section-title"><h2>Recent projects</h2></div>
         {loading ? <p className="projects-empty">Loading recent projects...</p> : recent.length === 0 ? <div className="projects-empty"><FolderOpen size={28}/><p>No recent projects yet.</p><span>Projects you open or save will appear here.</span></div> :
           <table><thead><tr><th>Project / file path</th><th>Last modified</th><th><span className="sr-only">Open</span></th></tr></thead><tbody>{recent.map(project => <tr key={project.path}>
             <td><button className="recent-project-link" disabled={opening || !project.available} onClick={() => void open(project.path)} title={project.path}><strong>{project.name}</strong><span>{project.path}</span></button>{!project.available && <small className="project-unavailable">File unavailable: reconnect its drive or use Open project to locate it.</small>}</td>

@@ -23,3 +23,12 @@ for (const version of [5, 6, 7]) {
 assert.throws(() => parseDeployProject(JSON.stringify({ ...old, packages: [] })), /imported package/);
 assert.throws(() => parseDeployProject(JSON.stringify({ ...old, audience_planes: [{ ...planes[0], id: old.sources[0].id }] })), /unique/);
 console.log("Blank projects, multiple planes, and v5/v6/v7 migration passed");
+
+const scale = { heatmapMinimumDb: 65, heatmapMaximumDb: 125, heatmapBandingDb: 7, pressureScalePa: 32 };
+const scaled = createDeployProject(blank.projectName, [], [], blank.channels, [], [], [], planes, 80, "pattern", scale);
+assert.ok(parseDeployProject(serializeDeployProject(scaled)).audience_planes.every(p => p.pressureScalePa === 32 && p.heatmapBandingDb === 7));
+scaled.audience_planes = [];
+assert.deepEqual(parseDeployProject(serializeDeployProject(scaled)).heatmap_scale, scale, "Scale survives removing all planes");
+const perPlane = { ...project, heatmap_scale: undefined, audience_planes: [{ ...planes[0], ...scale }, planes[1]] };
+assert.ok(parseDeployProject(JSON.stringify(perPlane)).audience_planes.every(p => p.pressureScalePa === 32), "Legacy per-plane scales use the first plane");
+assert.throws(() => parseDeployProject(JSON.stringify({ ...scaled, heatmap_scale: { ...scale, heatmapMaximumDb: 20 } })), /maximum/i);

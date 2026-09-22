@@ -330,7 +330,6 @@ const FIELD_PLANE_FRAGMENT_SHADER = /* glsl */ `
 `;
 
 function FieldPlane({
-  onSelect,
   observation,
   field,
   phaseAnimationEnabled,
@@ -350,7 +349,6 @@ function FieldPlane({
   active: boolean;
   transformMode: SceneTransformMode;
   angleSnapDisabled: boolean;
-  onSelect?: (additive: boolean) => void;
   onTransform: (pose: ObservationPoseUpdate) => void;
   onResize: (resize: ObservationResizeUpdate) => void;
   onManipulationEnd: () => void;
@@ -597,7 +595,7 @@ function FieldPlane({
           // DataTexture row zero is the near edge of the computed field. A +90°
           // rotation maps the plane's lower V edge toward the source (-scene Z).
           rotation={[Math.PI / 2, 0, 0]}
-          onClick={event => { event.stopPropagation(); onSelect?.(event.ctrlKey || event.metaKey); }}
+          raycast={() => undefined}
         >
           <planeGeometry args={[observation.widthM, observation.depthM]} />
           <primitive object={heatmapMaterial} attach="material" />
@@ -1631,7 +1629,6 @@ function AcousticScene(props: SceneViewProps) {
         onResize={props.onResizeObservation}
         onManipulationEnd={props.onManipulationEnd}
         onTextureReady={props.onFieldTextureReady}
-        onSelect={additive => props.onSelectInstance(observation.id, additive)}
       />)}
       <gridHelper args={[50, 50, "#303831", "#242a25"]} position={[0, 0, 12]} />
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.012, 12]} receiveShadow>

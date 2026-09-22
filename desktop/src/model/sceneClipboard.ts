@@ -60,7 +60,7 @@ export function pasteSelection(s: EditableScene, text: string, session: string):
       const translate = <T extends { positionX: number; positionZ: number }>(o: T): T => ({ ...o, positionX: o.positionX + dx, positionZ: o.positionZ + dz });
       return { ...s, sourceConfigs: [...s.sourceConfigs, ...sources.map(translate)],
         rigidObjects: [...s.rigidObjects, ...rigid.map(translate)], microphones: [...s.microphones, ...microphones.map(translate)],
-        audiencePlanes: [...s.audiencePlanes, ...planes.map(p => ({ ...p, centerXM: p.centerXM + dx, nearM: p.nearM + dz }))],
+        audiencePlanes: [...s.audiencePlanes, ...planes.map(p => ({ ...p, ...s.heatmapScale, centerXM: p.centerXM + dx, nearM: p.nearM + dz }))],
         activePlaneId: planes.at(-1)?.id ?? s.activePlaneId,
         selectedInstances: [...sources, ...rigid, ...microphones, ...planes].map(o => o.id) };
     }

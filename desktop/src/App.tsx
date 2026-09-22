@@ -1,3 +1,4 @@
+import { planeScale } from "./model/planeScale";
 import { FidelitySwitcher } from "./components/FidelitySwitcher";
 import { peakExcursionMillimeters, electricalSample, emptyFieldFrame, emptySolvedFieldCache, defaultSources, defaultObservation, buildRigidInstance, observationAcousticState, formatFrequency, type SolvedFieldCache } from "./model/sceneState";
 import {
@@ -76,13 +77,22 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     setRigidMeshes, setActiveRigidMeshId, setRigidObjects, setMicrophones, setAudiencePlanes, setActivePlaneId,
     setFrequencyIndex, setFidelity, setSelectedInstances, setProjectName } = useSceneEditor();
   const { packages, activePackageId, sourceConfigs, channels, activeChannelId, rigidMeshes,
-    activeRigidMeshId, rigidObjects, microphones, audiencePlanes, activePlaneId, frequencyIndex, fidelity,
+    activeRigidMeshId, rigidObjects, microphones, audiencePlanes, heatmapScale, activePlaneId, frequencyIndex, fidelity,
     selectedInstances, projectName } = present;
   const pkg = packages.find((candidate) => candidate.id === activePackageId) ?? packages[0];
   const frequenciesHz = pkg?.frequenciesHz ?? EMPTY_FREQUENCIES;
   const activePlane = audiencePlanes.find(p => p.id === activePlaneId) ?? audiencePlanes[0];
   const observation = activePlane ?? defaultObservation;
-  const setObservation = (value: ObservationPlane | ((current: ObservationPlane) => ObservationPlane)) => setAudiencePlanes(current => current.map(p => p.id === activePlane?.id ? { ...(typeof value === "function" ? value(p) : value), id: p.id, name: p.name } : p));
+  const setObservation = (value: ObservationPlane | ((current: ObservationPlane) => ObservationPlane)) => {
+    const scene = editor.present;
+    const current = scene.audiencePlanes.find(p => p.id === activePlane?.id);
+    if (!current) return;
+    const next = typeof value === "function" ? value(current) : value;
+    const scale = planeScale(next);
+    editor.update({ ...scene, heatmapScale: scale, audiencePlanes: scene.audiencePlanes.map(p => ({
+      ...(p.id === current.id ? { ...next, id: p.id, name: p.name } : p), ...scale,
+    })) }, "Edit audience plane");
+  };
   const [phaseAnimationEnabled, setPhaseAnimationEnabled] = useState(false);
   const clipboardPending = useRef(false);
   const browserClipboard = useRef("");
@@ -434,6 +444,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     audiencePlanes,
     frequenciesHz[frequencyIndex],
     fidelity,
+    heatmapScale,
   ));
   const projectEdited = savedProjectSnapshot === null || savedProjectSnapshot !== currentProjectContents;
   const captureCurrentAnalysis = () => {
@@ -473,6 +484,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     setChannels([defaultChannel]);
     setActiveChannelId(defaultChannel.id);
     setSourceConfigs(defaultSources(next));
+    editor.set("heatmapScale", planeScale());
     setAudiencePlanes([{ ...defaultObservation, id: "audience-plane", name: "Audience plane" }]);
     setActivePlaneId("audience-plane");
     setRigidMeshes([]);
@@ -580,6 +592,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
       project.audience_planes,
       nextPackage?.frequenciesHz[nextFrequencyIndex] ?? 80,
       nextFidelity,
+      project.heatmap_scale,
     ));
     setPackages(nextPackages);
     setRigidMeshes(nextRigidMeshes);
@@ -593,6 +606,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     sourceConfigsRef.current = nextSources;
     setMicrophones(project.microphones);
     microphonesRef.current = project.microphones;
+    editor.set("heatmapScale", project.heatmap_scale);
     setAudiencePlanes(project.audience_planes);
     setActivePlaneId(project.audience_planes[0]?.id ?? null);
     observationRef.current = project.audience_planes[0] ?? defaultObservation;
@@ -1590,7 +1604,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
   const addAudiencePlane = () => {
     const ids = new Set([...sourceConfigs, ...rigidObjects, ...microphones, ...audiencePlanes].map(o => o.id));
     let n = 1; while (ids.has(`audience-plane-${n}`)) n++;
-    const plane = { ...defaultObservation, id: `audience-plane-${n}`, name: `Audience plane ${n}`, centerXM: audiencePlanes.length * 2 };
+    const plane = { ...defaultObservation, ...heatmapScale, id: `audience-plane-${n}`, name: `Audience plane ${n}`, centerXM: audiencePlanes.length * 2 };
     editor.run("Add audience plane", () => { setAudiencePlanes(current => [...current, plane]); setActivePlaneId(plane.id); setSelectedInstances([plane.id]); });
     setTransformMode("select");
   };
@@ -2039,7 +2053,6 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
             <strong>{fidelity !== "pattern" ? (boundaryCurrent ? `${fidelity === "coupled" ? "Coupled" : "Boundary"} solution` : `${fidelity === "coupled" ? "Coupled" : "Boundary"} preview`) : "Pattern preview"}</strong>
             <small>{solveState === "solving" ? solveMessage : `${liveSolveEnabled ? "Live" : boundaryCurrent ? "BEAT CUDA" : "Current"} · ${formatFrequency(frequenciesHz[frequencyIndex])}${fidelity === "pattern" ? " · Rigid ground" : ""}`}</small>
           </div>
-          <em>{field.columns} × {field.rows}</em>
         </div>
         {activePlane && <div className="viewport-color-legend">
           <div className="legend-title"><span>{activePlane.name} / {observation.displayMode === "spl" ? "SPL" : phaseAnimationEnabled ? "Phase animation" : observation.displayMode === "real_pressure" ? "Real pressure" : "Imaginary pressure"}</span></div>

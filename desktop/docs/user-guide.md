@@ -41,7 +41,9 @@ speaker package and add scene objects as needed. Empty projects can be saved and
 reopened. The bundled S218BP study remains available through **Open example**.
 
 Each audience plane has its own position, orientation, dimensions, resolution, and
-display settings. Pattern coverage updates for all planes. Boundary/Coupled field
+display mode. SPL limits, pressure scale, and banding apply globally to all planes,
+including newly added or pasted planes. These settings are saved with the project
+and remain available after all planes are removed. Pattern coverage updates for all planes. Boundary/Coupled field
 solving evaluates every plane in sequence; Boundary reuses the cabinet solution
 between planes. More planes add field-evaluation work. Select a plane to inspect
 its settings and legend. Field solving requires at least one plane; microphone
@@ -82,7 +84,8 @@ angles are in degrees. Scene Y is height, with the ground at Y = 0.
 - Cabinet and rigid-object corner handles support placement and snapping. Direct
   dragging is ground-parallel; snapping to another height can change elevation.
 - Use **Add audience plane** in the scene header to create a plane. Select a plane
-  in the tree or viewport to move or rotate it. Remove selected planes with **Delete**. **R** enables corner resizing
+  in the scene objects/hierarchy list to move or rotate it. Planes do not intercept
+  viewport selection clicks. Remove selected planes with **Delete**. **R** enables corner resizing
   of the plane, not scaling of cabinets.
 - Use the viewport camera controls to inspect the arrangement; camera movement
   does not change source orientation or acoustic geometry.

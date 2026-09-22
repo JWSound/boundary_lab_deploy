@@ -15,6 +15,7 @@ app.whenReady().then(async () => {
       define: { "process.env.NODE_ENV": '"production"' },
       stdin: { resolveDir: join(__dirname, ".."), loader: "tsx", contents: `
         import React from 'react';
+        import {Raycaster,Vector3} from 'three';
         import {createRoot} from 'react-dom/client';
         import {_roots} from '@react-three/fiber';
         import {SceneView} from './src/components/SceneView';
@@ -39,9 +40,14 @@ app.whenReady().then(async () => {
         window.readScene=()=>{
           const state=Array.from(_roots.values())[0]?.store.getState();
           if(!state) return null;
-          let heatmap;
-          state.scene.traverse(o=>{ if(o.material?.uniforms?.uPhaseRad) heatmap=o.material.uniforms; });
-          return {frames:state.gl.info.render.frame, camera:state.camera.position.toArray(),
+          let heatmap, heatmapMesh;
+          state.scene.traverse(o=>{ if(o.material?.uniforms?.uPhaseRad) { heatmap=o.material.uniforms; heatmapMesh=o; } });
+          const hits=[];
+          if(heatmapMesh) {
+            const center=heatmapMesh.getWorldPosition(new Vector3());
+            heatmapMesh.raycast(new Raycaster(center.add(new Vector3(0,10,0)),new Vector3(0,-1,0)),hits);
+          }
+          return {planeHits:hits.length, frames:state.gl.info.render.frame, camera:state.camera.position.toArray(),
             maximum:heatmap?.uMaximumDb.value, spl:heatmap?.uSplMap.value.image.data[0], phase:heatmap?.uPhaseRad.value};
         };
         window.updateScene({});
@@ -68,6 +74,7 @@ app.whenReady().then(async () => {
       return after;
     }
     const initial=await settled();
+    assert.equal(initial.planeHits,0,"Audience heatmaps must not intercept viewport picking rays");
     await delay(500);
     assert.equal((await read()).frames, initial.frames, 'Static scene must draw no additional frames');
     const heatmap=await changed('window.updateObservation({heatmapMaximumDb:125})');

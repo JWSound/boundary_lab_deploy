@@ -58,14 +58,28 @@ app.whenReady().then(async()=>{
     await key('y');assert.equal((await save()).audience_planes.length,2);
     await click('button[aria-label="Remove selected objects"]');assert.equal((await save()).audience_planes.length,1);
     await key('z');assert.equal((await save()).audience_planes.length,2);
+    assert.equal(await run('document.querySelectorAll(".solve-status em").length'),0);
+    for (const [label,value] of [['Scale minimum',65],['Scale maximum',125],['Banding',7]]) {
+      await run(`(()=>{const input=document.querySelector('input[aria-label="${label}"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'${value}');input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+      await delay(80);
+    }
+    const scaled=await save();
+    assert.ok(scaled.audience_planes.every(p=>p.heatmapMinimumDb===65 && p.heatmapMaximumDb===125 && p.heatmapBandingDb===7));
+    await key('z');assert.ok((await save()).audience_planes.every(p=>p.heatmapBandingDb===planes[0].heatmapBandingDb));
+    await key('y');
+    await click('button[aria-label="Add audience plane"]');
+    assert.equal((await save()).audience_planes.at(-1).heatmapBandingDb,7,'New planes inherit the shared scale');
+    await key('z');await save();
     await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Projects').click()`);
     await wait('document.querySelector(".recent-project-link")');
+    assert.equal(await run('document.querySelectorAll(".projects-heading p, .projects-section-title span").length'),0);
     assert.ok(await run(`document.querySelector('.recent-project-link').textContent.includes('E:/Studies/test.blabdeploy.json')`));
     writeFileSync(join(dir,'projects-screen.png'),(await win.capturePage()).toPNG());
     await click('.recent-project-link');
     await wait('document.querySelector(".app-shell")');
     assert.equal(await run('window.openedPath'),'E:/Studies/test.blabdeploy.json');
     assert.equal((await save()).audience_planes.length,2,'Recent project restores every plane without speaker packages');
+    assert.ok((await save()).audience_planes.every(p=>p.heatmapBandingDb===7),'Global scales survive reopening');
     await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Projects').click()`);
     await wait('document.querySelector(".projects-screen")');
     // Use the generated browser example here; disk package parsing has separate coverage.
