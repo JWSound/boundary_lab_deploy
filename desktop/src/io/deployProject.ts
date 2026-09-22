@@ -1,10 +1,11 @@
+import { parseEqualizer } from "../model/filters";
 import { planeScale, type PlaneScale } from "../model/planeScale";
 import { defaultObservation } from "../model/sceneState";
 import { createDefaultChannel, DEFAULT_CHANNEL_ID, DEFAULT_SYSTEM_GAIN_DB } from "../model/channels";
 import type { DeployChannel, EqualizerConfiguration, Fidelity, LoadedSpeakerPackage, MicrophoneConfiguration, ObservationPlane, AudiencePlane, RigidMeshAsset, RigidMeshConfiguration, SourceConfiguration } from "../model/types";
 
 export const DEPLOY_PROJECT_SCHEMA = "boundary-lab-deploy-project";
-export const DEPLOY_PROJECT_SCHEMA_VERSION = 9;
+export const DEPLOY_PROJECT_SCHEMA_VERSION = 10;
 
 export interface DeployPackageReference {
   id: string;
@@ -83,12 +84,8 @@ function gridSize(value: unknown, label: string): number {
 
 function equalizerConfiguration(value: unknown, label: string, legacy: boolean): EqualizerConfiguration {
   if (legacy || value === undefined) return { filters: [] };
-  const equalizer = record(value, label);
-  if (!Array.isArray(equalizer.filters)) throw new Error(`${label}.filters must be an array.`);
-  // The editor is intentionally a placeholder. Reject non-empty banks until the
-  // filter evaluator and its schema are implemented together.
-  if (equalizer.filters.length > 0) throw new Error(`${label}.filters are not supported by this version.`);
-  return { filters: [] };
+  try { return parseEqualizer(value); }
+  catch (error) { throw new Error(`${label}: ${error instanceof Error ? error.message : error}`); }
 }
 
 function channelConfiguration(value: unknown, index: number): DeployChannel {
@@ -213,7 +210,7 @@ export function parseDeployProject(contents: string): DeployProject {
   const project = record(raw, "Project");
   if (project.schema !== DEPLOY_PROJECT_SCHEMA) throw new Error("This is not a Boundary Lab Deploy project.");
   const version = finite(project.schema_version, "schema_version");
-  if (version !== 5 && version !== 6 && version !== 7 && version !== 8 && version !== DEPLOY_PROJECT_SCHEMA_VERSION) {
+  if (version !== 5 && version !== 6 && version !== 7 && version !== 8 && version !== 9 && version !== DEPLOY_PROJECT_SCHEMA_VERSION) {
     throw new Error(`Unsupported Boundary Lab Deploy project schema version ${version}.`);
   }
   if (typeof project.name !== "string" || project.name.trim().length === 0) {

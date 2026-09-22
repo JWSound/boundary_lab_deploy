@@ -29,6 +29,8 @@ jobs:
         working-directory: desktop
       - run: npm run test:placement
         working-directory: desktop
+      - run: npm run test:filters
+        working-directory: desktop
       - run: npm run test:pattern
         working-directory: desktop
       - run: npm run test:runtime

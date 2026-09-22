@@ -17,7 +17,7 @@ const example = exampleScene();
 const old = createDeployProject(example.projectName, example.packages, [], example.channels, example.sourceConfigs, [], [], example.audiencePlanes, 80, "pattern");
 for (const version of [5, 6, 7]) {
   const migrated = parseDeployProject(JSON.stringify({ ...old, schema_version: version, audience_planes: undefined, observation_plane: defaultObservation }));
-  assert.equal(migrated.schema_version, 9); assert.equal(migrated.audience_planes.length, 1);
+  assert.equal(migrated.schema_version, 10); assert.equal(migrated.audience_planes.length, 1);
   assert.deepEqual(migrated.audience_planes[0], { ...defaultObservation, id: "audience-plane", name: "Audience plane" });
 }
 assert.throws(() => parseDeployProject(JSON.stringify({ ...old, packages: [] })), /imported package/);

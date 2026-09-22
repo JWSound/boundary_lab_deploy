@@ -94,13 +94,18 @@ export interface SourceConfiguration {
   polarity: 1 | -1;
   equalizer: EqualizerConfiguration;
   muted?: boolean;
+  /** Effective drive only; project serialization retains channel banks separately. */
+  channelEqualizer?: EqualizerConfiguration;
 }
 
 export interface EqualizerConfiguration {
+  bypassed?: boolean;
   filters: EqualizerFilter[];
 }
 
 export interface EqualizerFilter {
+  family?: "butterworth" | "linkwitz-riley";
+  order?: number;
   id: string;
   type: "peq" | "lowpass" | "highpass" | "low-shelf" | "high-shelf" | "allpass";
   enabled: boolean;
