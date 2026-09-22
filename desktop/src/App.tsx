@@ -1,3 +1,4 @@
+import { FilterBankEditor } from "./components/FilterBankEditor";
 import { planeScale } from "./model/planeScale";
 import { FidelitySwitcher } from "./components/FidelitySwitcher";
 import { peakExcursionMillimeters, electricalSample, emptyFieldFrame, emptySolvedFieldCache, defaultSources, defaultObservation, buildRigidInstance, observationAcousticState, formatFrequency, type SolvedFieldCache } from "./model/sceneState";
@@ -99,7 +100,10 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
   const browserClipboard = useRef("");
   const [error, setError] = useState<string | null>(null);
   const [leftTab, setLeftTab] = useState<"library" | "scene" | "channels">("library");
-  const [equalizerPopup, setEqualizerPopup] = useState<{ scope: "channel" | "speaker"; name: string } | null>(null);
+  const [equalizerPopup, setEqualizerPopup] = useState<{ scope: "channel" | "speaker"; id: string } | null>(null);
+  const equalizerTarget = equalizerPopup?.scope === "channel" ? channels.find(c => c.id === equalizerPopup.id)
+    : sourceConfigs.find(c => c.id === equalizerPopup?.id);
+  useEffect(() => { if (equalizerPopup && !equalizerTarget) setEqualizerPopup(null); }, [equalizerPopup, equalizerTarget]);
   const [solvedFields, setSolvedFields] = useState<SolvedFieldCache>(emptySolvedFieldCache);
   const [boundarySolutionKey, setBoundarySolutionKey] = useState<string | null>(null);
   const [solveRevision, setSolveRevision] = useState(0);
@@ -1747,6 +1751,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
       const target = event.target;
       const transformableSelected = Boolean(selectedSource) || Boolean(selectedRigid) || Boolean(selectedMicrophone) || Boolean(activePlane && selectedInstance === activePlane.id);
       if (event.isComposing || (target instanceof Element && target.closest("input:not([type=range]):not([type=checkbox]), textarea, select, [contenteditable]:not([contenteditable='false'])"))) return;
+      if (equalizerPopup && !((event.ctrlKey || event.metaKey) && ["z", "y"].includes(event.key.toLowerCase()))) return;
       if (event.ctrlKey || event.metaKey) {
         const key = event.key.toLowerCase();
         if (["x", "c", "v", "z", "y", "d"].includes(key)) event.preventDefault();
@@ -2013,7 +2018,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
             onRemove={removeChannel}
             onChange={updateChannel}
             onAssign={assignSourceChannel}
-            onOpenEqualizer={(channel) => setEqualizerPopup({ scope: "channel", name: channel.name })}
+            onOpenEqualizer={(channel) => setEqualizerPopup({ scope: "channel", id: channel.id })}
           />
         )}
       </aside>
@@ -2102,7 +2107,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
               channels={channels}
               minimumHeightM={sourceMinimumHeightM}
               onChange={updateSelectedSource}
-              onOpenEqualizer={() => setEqualizerPopup({ scope: "speaker", name: selectedSource.name })}
+              onOpenEqualizer={() => setEqualizerPopup({ scope: "speaker", id: selectedSource.id })}
             />
           </>
         ) : selectedRigid ? (
@@ -2234,20 +2239,14 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
           </div>
         </div>
       </section>
-      {equalizerPopup && (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => setEqualizerPopup(null)}>
-          <section className="equalizer-popup" role="dialog" aria-modal="true" aria-label={`${equalizerPopup.name} equalizer`} onMouseDown={(event) => event.stopPropagation()}>
-            <header><div><small>{equalizerPopup.scope === "channel" ? "CHANNEL PROCESSING" : "SPEAKER-OBJECT PROCESSING"}</small><strong>{equalizerPopup.name} EQ</strong></div><button className="icon-button quiet" aria-label="Close equalizer" onClick={() => setEqualizerPopup(null)}>×</button></header>
-            <div className="equalizer-placeholder">
-              <SlidersHorizontal size={34} strokeWidth={1.2} />
-              <strong>Filter bank coming next</strong>
-              <p>Filter editing is coming next. Filter banks saved in the project are applied to calculations.</p>
-              <div className="equalizer-placeholder-graph"><span>20 Hz</span><i /><span>20 kHz</span></div>
-            </div>
-            <footer><button className="processing-button" onClick={() => setEqualizerPopup(null)}>Close</button></footer>
-          </section>
-        </div>
-      )}
+      {equalizerPopup && equalizerTarget && <FilterBankEditor key={`${equalizerPopup.scope}:${equalizerPopup.id}`}
+        name={equalizerTarget.name} scope={equalizerPopup.scope} bank={equalizerTarget.equalizer}
+        onClose={() => setEqualizerPopup(null)} onChange={equalizer => {
+          editor.run(`Edit ${equalizerPopup.scope} filters`, () => {
+            if (equalizerPopup.scope === "channel") setChannels(current => current.map(channel => channel.id === equalizerPopup.id ? { ...channel, equalizer } : channel));
+            else setSourceConfigs(current => current.map(source => source.id === equalizerPopup.id ? { ...source, equalizer } : source));
+          });
+        }} />}
       {error && <div className="error-toast" onClick={() => setError(null)}><strong>Boundary Lab Deploy</strong><span>{error}</span></div>}
       <input
         ref={packageFileInput}
