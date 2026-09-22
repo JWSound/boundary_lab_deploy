@@ -410,7 +410,8 @@ def test_prepare_rom_request_retains_scene_speaker_and_transducer_identity(tmp_p
     assert request["transducers"][0]["name"] == "subwoofer-1 / 18DS115-8"
 
 
-def test_prepare_exact_coupled_request_batches_microphones_and_frequency_weights(monkeypatch, tmp_path: Path) -> None:
+@pytest.mark.parametrize("with_filter", [False, True])
+def test_prepare_exact_coupled_request_batches_microphones_and_frequency_weights(monkeypatch, tmp_path: Path, with_filter) -> None:
     package = type(
         "Package",
         (),
@@ -464,7 +465,9 @@ def test_prepare_exact_coupled_request_batches_microphones_and_frequency_weights
             "packagePath": "speaker.blabsp",
             "backend": "cuda",
             "frequenciesHz": [20.0, 40.0],
-            "sources": [{"id": "source", "delayMs": 12.5}],
+            "sources": [{"id": "source", "delayMs": 12.5, "equalizer": {"filters": [
+                {"id": "ap", "type": "allpass", "frequencyHz": 20, "gainDb": 0, "q": 1, "enabled": with_filter}
+            ]}}],
             "observationPointsM": [[0.0, 1.2, 4.0], [1.0, 1.2, 5.0]],
         },
         tmp_path,
@@ -475,8 +478,8 @@ def test_prepare_exact_coupled_request_batches_microphones_and_frequency_weights
     assert request["deploy"]["rows"] == 1
     assert request["deploy"]["columns"] == 2
     weights = request["outputs"][0]["options"]["excitation_weights_sweep"]
-    assert complex(weights[0][0]["real"], weights[0][0]["imag"]) == pytest.approx(-1j, abs=1e-7)
-    assert complex(weights[1][0]["real"], weights[1][0]["imag"]) == pytest.approx(-1 + 0j, abs=1e-7)
+    assert complex(weights[0][0]["real"], weights[0][0]["imag"]) == pytest.approx(1j if with_filter else -1j, abs=1e-7)
+    assert complex(weights[1][0]["real"], weights[1][0]["imag"]) == pytest.approx(-((-3-2j)/(-3+2j)) if with_filter else -1, abs=1e-7)
 
 
 def test_prepare_deploy_solve_request_can_select_operator_matrix_fallback(tmp_path: Path) -> None:

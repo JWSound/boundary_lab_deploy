@@ -11,6 +11,8 @@ import type {
   RigidMeshAsset,
 } from "./types";
 
+import { sourceDrive } from "./filters";
+
 const PRESSURE_REFERENCE_PA = 20e-6;
 
 // A rigid y=0 plane has pressure reflection coefficient +1. Reflecting the
@@ -129,6 +131,7 @@ export function computeMixedMicrophonePatternResponses(
   )].filter((frequency) => frequency >= commonMinimum && frequency <= commonMaximum).sort((left, right) => left - right);
   if (commonFrequencies.length === 0) throw new Error("Active speaker packages do not share an overlapping frequency range.");
   const frequenciesHz = Float64Array.from(commonFrequencies);
+  const drives = new Map(configs.map(config => [config.id, Array.from(frequenciesHz, f => sourceDrive(config, f))]));
   const sourceData = microphones.map((microphone) => sources.flatMap((source, sourceIndex) => {
     const config = configs[sourceIndex];
     const pkg = packages.get(config.packageId);
@@ -186,10 +189,7 @@ export function computeMixedMicrophonePatternResponses(
           const [fieldReal, fieldImag] = propagatePattern(
             sampleReal, sampleImag, sample.referenceRadius, sample.distance, wavenumber,
           );
-          const driveMagnitude = (sample.config.muted ? 0 : Math.pow(10, sample.config.levelDb / 20)) * sample.config.polarity;
-          const drivePhase = -2 * Math.PI * frequency * sample.config.delayMs / 1000;
-          const driveReal = driveMagnitude * Math.cos(drivePhase);
-          const driveImag = driveMagnitude * Math.sin(drivePhase);
+          const [driveReal, driveImag] = drives.get(sample.config.id)![frequencyOutputIndex];
           totalReal += fieldReal * driveReal - fieldImag * driveImag;
           totalImag += fieldReal * driveImag + fieldImag * driveReal;
           if (sample.distance < sample.referenceRadius) clippedNearFieldSamples += 1;
@@ -470,14 +470,13 @@ export function computeMixedFieldFrame(
     if (!pkg) throw new Error(`Source ${config.name} references a package that is not loaded.`);
     const lookup = lookups.get(config.packageId);
     if (!lookup) throw new Error(`Source ${config.name} has no pattern lookup for its package.`);
-    const level = (config.muted ? 0 : Math.pow(10, config.levelDb / 20)) * config.polarity;
-    const drivePhase = -2 * Math.PI * frequencyHz * config.delayMs / 1000;
+    const [driveReal, driveImag] = sourceDrive(config, frequencyHz);
     return {
       source,
       lookup,
       wavenumber: (2 * Math.PI * frequencyHz) / pkg.manifest.medium.sound_speed_m_per_s,
-      driveReal: level * Math.cos(drivePhase),
-      driveImag: level * Math.sin(drivePhase),
+      driveReal,
+      driveImag,
       inverseRotation: new Quaternion().setFromEuler(new Euler(
         MathUtils.degToRad(source.pitchDeg),
         MathUtils.degToRad(source.yawDeg),

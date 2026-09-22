@@ -35,6 +35,7 @@ export function applyChannelProcessing(
       delayMs: source.delayMs + channel.delayMs,
       polarity: (source.polarity * channel.polarity) as 1 | -1,
       muted: channel.muted,
+      channelEqualizer: channel.equalizer,
     };
   });
 }

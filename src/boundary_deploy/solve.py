@@ -7,7 +7,7 @@ import hashlib
 import json
 import math
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
@@ -21,6 +21,7 @@ from boundary_deploy.assets import (
     _load_rigid_mesh_data,
     _write_deploy_binary_arrays,
 )
+from boundary_deploy.filters import parse_equalizer, source_drive
 from boundary_deploy.geometry import (
     first_surface_pair_within,
     surface_face_pairs_within,
@@ -62,6 +63,8 @@ class DeploySourcePlacement:
     delay_ms: float
     polarity: int
     muted: bool
+    equalizer: dict = field(default_factory=lambda: {"filters": []})
+    channel_equalizer: dict = field(default_factory=lambda: {"filters": []})
 
     @classmethod
     def from_payload(cls, raw: object) -> "DeploySourcePlacement":
@@ -82,6 +85,8 @@ class DeploySourcePlacement:
             delay_ms=float(raw.get("delayMs", 0.0)),
             polarity=polarity,
             muted=bool(raw.get("muted", False)),
+            equalizer=parse_equalizer(raw.get("equalizer", {"filters": []})),
+            channel_equalizer=parse_equalizer(raw.get("channelEqualizer", {"filters": []})),
         )
         if not values.id:
             raise ValueError("Deploy source id must not be empty.")
@@ -550,10 +555,7 @@ def prepare_deploy_coupled_request(
             combined_ports.append(cloned)
             excitation_ids.append(str(cloned["id"]))
             for frequency_index, frequency_hz in enumerate(frequencies):
-                gain_phase = 2.0 * math.pi * frequency_hz * source.delay_ms / 1000.0
-                gain = (0.0 if source.muted else source.polarity * 10.0 ** (source.level_db / 20.0)) * np.exp(
-                    -1j * gain_phase
-                )
+                gain = source_drive(source, frequency_hz)
                 wire_gain = {"real": float(gain.real), "imag": float(gain.imag)}
                 excitation_weights_sweep[frequency_index].append(wire_gain)
                 if frequency_index == 0:
@@ -900,8 +902,7 @@ def prepare_deploy_solve_request(
             roll_deg=source.roll_deg,
             yaw_deg=source.yaw_deg,
         )
-        phase = 2.0 * math.pi * frequency_hz * source.delay_ms / 1000.0
-        gain = (0.0 if source.muted else source.polarity * 10.0 ** (source.level_db / 20.0)) * np.exp(-1j * phase)
+        gain = source_drive(source, frequency_hz)
         component = DeployBoundaryComponent(
             id=source.id,
             kind="speaker",
@@ -1496,8 +1497,7 @@ def _prepare_single_rom_request(
     reference_voltage = float(payload.get("transducerReferenceVoltageV", 2.83))
     instances = []
     for source, component in zip(sources, source_components, strict=True):
-        phase = 2.0 * math.pi * requested_frequency * source.delay_ms / 1000.0
-        gain = (0.0 if source.muted else source.polarity * 10.0 ** (source.level_db / 20.0)) * np.exp(-1j * phase)
+        gain = source_drive(source, requested_frequency)
         drive = np.full(input_count, reference_voltage * gain, dtype=np.complex64)
         instances.append(
             {
@@ -1690,8 +1690,7 @@ def _prepare_single_rom_sweep_request(
         input_count = int(np.asarray(arrays["b"][array_index]).shape[-1])
         instances: list[dict[str, Any]] = []
         for source, base_instance in zip(sources, base_instances, strict=True):
-            phase = 2.0 * math.pi * frequency_hz * source.delay_ms / 1000.0
-            gain = (0.0 if source.muted else source.polarity * 10.0 ** (source.level_db / 20.0)) * np.exp(-1j * phase)
+            gain = source_drive(source, frequency_hz)
             drive = np.full(input_count, reference_voltage * gain, dtype=np.complex64)
             instances.append(
                 {
@@ -1857,8 +1856,7 @@ def prepare_deploy_microphone_sweep_request(
                 frequency_index,
                 excitation_indices,
             )
-            phase = 2.0 * math.pi * frequency_hz * source.delay_ms / 1000.0
-            gain = (0.0 if source.muted else source.polarity * 10.0 ** (source.level_db / 20.0)) * np.exp(-1j * phase)
+            gain = source_drive(source, frequency_hz)
             q_parts.append(np.asarray(logical_normal * gain, dtype=np.complex64))
             pressure_parts.append(np.asarray(logical_pressure * gain, dtype=np.complex64))
         if rigid_face_count:

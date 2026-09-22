@@ -79,3 +79,17 @@ const amplified = check(applyChannelProcessing(configs, channels, 32), plane);
 close(amplified.splDb[0] - reference.splDb[0], 32, 2e-5);
 close(amplified.pressureReal[0], reference.pressureReal[0] * 10 ** (32 / 20));
 close(amplified.pressureImag[0], reference.pressureImag[0] * 10 ** (32 / 20));
+
+// All-pass must change complex fields (and interference), despite unity magnitude.
+const allpass = { id: "ap", type: "allpass" as const, enabled: true, frequencyHz: 100, gainDb: 0, q: 1 };
+const original = check([source], plane);
+const filteredSource = { ...source, equalizer: { filters: [allpass] } };
+const filteredMap = computeFieldFrame(pkg, [buildSourceInstance(source)], [filteredSource], plane, 0, buildPatternLookup(pkg, 0));
+close(filteredMap.pressureReal[0], -original.pressureReal[0]);
+close(filteredMap.pressureImag[0], -original.pressureImag[0]);
+const mic = [{ id: "filter-mic", name: "Filter mic", positionX: plane.centerXM, positionHeightM: plane.heightM, positionZ: plane.nearM }];
+const shifted = computeMicrophonePatternResponses(pkg, [buildSourceInstance(source)], [filteredSource], mic);
+close(shifted.traces[0].splDb[0], original.splDb[0]);
+const pair = [source, { ...source, id: "cancel", equalizer: { filters: [allpass] } }];
+const cancellation = computeMicrophonePatternResponses(pkg, pair.map(buildSourceInstance), pair, mic);
+assert.ok(cancellation.traces[0].splDb[0] < original.splDb[0] - 100);

@@ -177,3 +177,32 @@ def test_mixed_preparation_reuses_proximity_without_aliasing(mixed, tmp_path, mo
     invalid["sources"][2]["positionX"] = invalid["sources"][0]["positionX"]
     with pytest.raises(ValueError, match="surface spacing"):
         prepare_deploy_rom_request(invalid, tmp_path / "invalid", cache=cache)
+
+
+@pytest.mark.parametrize("mode", ["single", "sweep", "boundary", "boundary_sweep"])
+def test_filter_drives_reach_mixed_solve_paths(mixed, tmp_path, mode):
+    from boundary_deploy.solve import prepare_deploy_solve_request
+    payload, cache, _, _ = mixed
+    f = {"id": "peq", "type": "peq", "frequencyHz": 40, "gainDb": 6, "q": 1, "enabled": True}
+    for source in payload["sources"]:
+        source["equalizer"] = {"filters": [f]}
+        source["channelEqualizer"] = {"filters": [f]}
+    prepare = {"single": prepare_deploy_rom_request, "sweep": prepare_deploy_rom_microphone_sweep_request,
+        "boundary": prepare_deploy_solve_request, "boundary_sweep": prepare_deploy_microphone_sweep_request}[mode]
+    _, request = prepare(payload, tmp_path / mode, cache=cache)
+    expected = 10**(12/20)
+    if mode == "single":
+        drive = request["rom"]["instances"][0]
+        assert complex(drive["input_real"][0], drive["input_imag"][0]) == pytest.approx(2.83*expected)
+    elif mode == "sweep":
+        for entry, frequency in zip(request["rom_sweep"]["frequencies"], request["frequencies_hz"], strict=True):
+            # Independent PEQ transfer with both banks, including phase away from center.
+            s = 1j * frequency / 40
+            a = 10**(6/40)
+            h = ((s*s+a*s+1)/(s*s+s/a+1))**2
+            drive = entry["instances"][0]
+            assert complex(drive["input_real"][0], drive["input_imag"][0]) == pytest.approx(2.83*h, rel=1e-6)
+    else:
+        field = request["boundary_neumann"] if mode == "boundary" else request["boundary_neumann_sweep"]
+        real = field["real"] if mode == "boundary" else field["real"][0]
+        assert real[0] == pytest.approx(expected)

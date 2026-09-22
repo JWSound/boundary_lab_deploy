@@ -2241,7 +2241,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
             <div className="equalizer-placeholder">
               <SlidersHorizontal size={34} strokeWidth={1.2} />
               <strong>Filter bank coming next</strong>
-              <p>This window reserves the editing surface for parametric EQ, crossover and all-pass filters. No filters are applied yet.</p>
+              <p>Filter editing is coming next. Filter banks saved in the project are applied to calculations.</p>
               <div className="equalizer-placeholder-graph"><span>20 Hz</span><i /><span>20 kHz</span></div>
             </div>
             <footer><button className="processing-button" onClick={() => setEqualizerPopup(null)}>Close</button></footer>
