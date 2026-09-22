@@ -1,5 +1,5 @@
 import { FidelitySwitcher } from "./components/FidelitySwitcher";
-import { peakExcursionMillimeters, electricalSample, emptyFieldFrame, emptySolvedFieldCache, defaultSources, buildRigidInstance, defaultObservation, observationAcousticState, formatFrequency, type SolvedFieldCache } from "./model/sceneState";
+import { peakExcursionMillimeters, electricalSample, emptyFieldFrame, emptySolvedFieldCache, defaultSources, buildRigidInstance, observationAcousticState, formatFrequency, type SolvedFieldCache } from "./model/sceneState";
 import {
   ChevronRight,
   Box,
@@ -7,7 +7,6 @@ import {
   Grid3X3,
   Import,
   Maximize2,
-  Menu,
   Mic2,
   MousePointer2,
   Move3D,
@@ -16,7 +15,6 @@ import {
   Plus,
   Rotate3D,
   Save,
-  Copy,
   Settings2,
   SlidersHorizontal,
   Speaker,
@@ -47,7 +45,8 @@ import {
 import { loadSpeakerPackage } from "./io/speakerPackage";
 import { loadRigidMesh } from "./io/rigidMesh";
 import { createDeployProject, parseDeployProject, serializeDeployProject, type DeployProject } from "./io/deployProject";
-import { createDemoPackage } from "./model/demoPackage";
+import { useSceneEditor } from "./model/useSceneEditor";
+import { copySelection, pasteSelection, removeSelection, selectedObjectIds } from "./model/sceneClipboard";
 import {
   buildPackagePatternLookups,
   buildSourceInstance,
@@ -60,25 +59,21 @@ import {
 import type { Fidelity, FieldFrame, LoadedSpeakerPackage, MicrophoneConfiguration, ObservationPlane, RigidMeshAsset, RigidMeshConfiguration, SourceConfiguration } from "./model/types";
 import { heatmapLegendGradient } from "./model/heatmap";
 import { cabinetClearanceViolations, constrainCabinetPoses, findClearSourcePlacement, type BoundaryMeshAsset } from "./model/cabinetPlacement";
-import { applyChannelProcessing, CHANNEL_COLORS, createDefaultChannel, DEFAULT_CHANNEL_ID } from "./model/channels";
+import { applyChannelProcessing, CHANNEL_COLORS, createDefaultChannel } from "./model/channels";
 import type { DeployChannel } from "./model/types";
 
 export function App() {
-  const [packages, setPackages] = useState<LoadedSpeakerPackage[]>(() => [createDemoPackage()]);
-  const [activePackageId, setActivePackageId] = useState(() => packages[0].id);
+  const { editor, present,
+    setPackages, setActivePackageId, setSourceConfigs, setChannels, setActiveChannelId,
+    setRigidMeshes, setActiveRigidMeshId, setRigidObjects, setMicrophones, setObservation,
+    setFrequencyIndex, setFidelity, setSelectedInstances, setProjectName } = useSceneEditor();
+  const { packages, activePackageId, sourceConfigs, channels, activeChannelId, rigidMeshes,
+    activeRigidMeshId, rigidObjects, microphones, observation, frequencyIndex, fidelity,
+    selectedInstances, projectName } = present;
   const pkg = packages.find((candidate) => candidate.id === activePackageId) ?? packages[0];
-  const [sourceConfigs, setSourceConfigs] = useState<SourceConfiguration[]>(() => defaultSources(pkg));
-  const [channels, setChannels] = useState<DeployChannel[]>(() => [createDefaultChannel()]);
-  const [activeChannelId, setActiveChannelId] = useState(DEFAULT_CHANNEL_ID);
-  const [rigidMeshes, setRigidMeshes] = useState<RigidMeshAsset[]>([]);
-  const [activeRigidMeshId, setActiveRigidMeshId] = useState<string | null>(null);
-  const [rigidObjects, setRigidObjects] = useState<RigidMeshConfiguration[]>([]);
-  const [microphones, setMicrophones] = useState<MicrophoneConfiguration[]>([]);
-  const [observation, setObservation] = useState(defaultObservation);
   const [phaseAnimationEnabled, setPhaseAnimationEnabled] = useState(false);
-  const [frequencyIndex, setFrequencyIndex] = useState(() => nearestFrequencyIndex(pkg, 80));
-  const [fidelity, setFidelity] = useState<Fidelity>("pattern");
-  const [selectedInstances, setSelectedInstances] = useState<string[]>(["subwoofer-1"]);
+  const clipboardPending = useRef(false);
+  const browserClipboard = useRef("");
   const [error, setError] = useState<string | null>(null);
   const [leftTab, setLeftTab] = useState<"library" | "scene" | "channels">("library");
   const [equalizerPopup, setEqualizerPopup] = useState<{ scope: "channel" | "speaker"; name: string } | null>(null);
@@ -90,7 +85,6 @@ export function App() {
   const [liveSolveEnabled, setLiveSolveEnabled] = useState(false);
   const [transformMode, setTransformMode] = useState<SceneTransformMode>("select");
   const [angleSnapDisabled, setAngleSnapDisabled] = useState(false);
-  const [projectName, setProjectName] = useState("S218BP Subwoofer Study");
   const [projectFileName, setProjectFileName] = useState("s218bp-subwoofer-study.blabdeploy.json");
   const [savedProjectSnapshot, setSavedProjectSnapshot] = useState<string | null>(null);
   const [solveReleaseRevision, setSolveReleaseRevision] = useState(0);
@@ -132,6 +126,7 @@ export function App() {
   const rigidMeshFileInput = useRef<HTMLInputElement>(null);
   const projectFileInput = useRef<HTMLInputElement>(null);
   const solveGeneration = useRef(0);
+  const sweepGeneration = useRef(0);
   const pendingRenderProfile = useRef<Record<string, unknown> | null>(null);
   const sourceConfigsRef = useRef(sourceConfigs);
   const rigidObjectsRef = useRef(rigidObjects);
@@ -257,7 +252,7 @@ export function App() {
     : Array.from(pkg.frequenciesHz.keys()).sort((a, b) => pkg.frequenciesHz[a] - pkg.frequenciesHz[b]);
   const sortedPosition = Math.max(0, usableFrequencyIndices.indexOf(frequencyIndex));
   useEffect(() => {
-    if (!usableFrequencyIndices.includes(frequencyIndex)) setFrequencyIndex(usableFrequencyIndices[0]);
+    if (!usableFrequencyIndices.includes(frequencyIndex)) editor.set("frequencyIndex", usableFrequencyIndices[0], false);
   }, [frequencyIndex, usableFrequencyIndices]);
   const packageForSource = useCallback(
     (source: SourceConfiguration) => packageById.get(source.packageId) ?? pkg,
@@ -461,6 +456,7 @@ export function App() {
 
   const initializePackage = (next: LoadedSpeakerPackage) => {
     solveGeneration.current += 1;
+    sweepGeneration.current += 1; microphoneSweepKeyRef.current = null;
     setPackages([next]);
     setActivePackageId(next.id);
     const defaultChannel = createDefaultChannel();
@@ -490,6 +486,7 @@ export function App() {
     setProjectFileName(`${next.manifest.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "deploy"}-study.blabdeploy.json`);
     setSavedProjectSnapshot(null);
     setError(null);
+    editor.clear();
   };
 
   const importPackage = (next: LoadedSpeakerPackage) => {
@@ -502,7 +499,6 @@ export function App() {
     });
     setActivePackageId(next.id);
     setFrequencyIndex(nearestFrequencyIndex(next, pkg.frequenciesHz[frequencyIndex]));
-    setSavedProjectSnapshot(null);
     setError(null);
   };
 
@@ -524,6 +520,7 @@ export function App() {
       if (!nextRigidMeshById.has(reference.id)) throw new Error(`Project rigid mesh ${reference.name} was not loaded correctly.`);
     }
     solveGeneration.current += 1;
+    sweepGeneration.current += 1; microphoneSweepKeyRef.current = null;
     const nextSources = project.sources.map((source) => ({
       ...source,
       positionHeightM: Math.max(
@@ -605,6 +602,7 @@ export function App() {
     setError(clearanceViolations.length > 0
       ? `Loaded project contains ${clearanceViolations.length} speaker clearance violation${clearanceViolations.length === 1 ? "" : "s"}. Move the affected cabinets apart before placing them closer together.`
       : null);
+    editor.clear();
   };
 
   useEffect(() => window.boundaryLabDesktop?.onSolveStatus((status) => {
@@ -613,6 +611,7 @@ export function App() {
   }), []);
 
   useEffect(() => window.boundaryLabDesktop?.onMicrophoneSweepProgress((progress) => {
+    if (microphoneSweepKeyRef.current === null) return;
     setAcousticResponse((current) => current && current.key === microphoneSweepKeyRef.current
       ? updateAcousticLoading(current, progress) : current);
     setMicrophoneSweepProgress({ completed: progress.completed_count, total: progress.total_count });
@@ -731,7 +730,6 @@ export function App() {
       return next;
     });
     setActiveRigidMeshId(asset.id);
-    setSavedProjectSnapshot(null);
     setError(null);
   };
 
@@ -932,6 +930,7 @@ export function App() {
 
   const calculateMicrophoneSweep = useCallback(async () => {
     if (!window.boundaryLabDesktop || !level2Package?.sourcePath || (microphones.length === 0 && fidelity !== "coupled")) return;
+    const generation = ++sweepGeneration.current;
     const requestedKey = microphoneSweepKey;
     if (fidelity === "coupled") setAcousticResponse({
       key: requestedKey,
@@ -977,6 +976,7 @@ export function App() {
         })),
         microphones,
       });
+      if (generation !== sweepGeneration.current) return;
       if (result.cancelled) {
         setMicrophoneSweepState("idle");
         return;
@@ -1033,6 +1033,7 @@ export function App() {
       setMicrophoneSweepProgress({ completed: result.completed_count, total: result.total_count });
       setMicrophoneSweepState("complete");
     } catch (caught) {
+      if (generation !== sweepGeneration.current) return;
       if (stoppingMicrophoneSweep.current) {
         setMicrophoneSweepState("idle");
       } else {
@@ -1040,7 +1041,7 @@ export function App() {
         setError(caught instanceof Error ? caught.message : String(caught));
       }
     } finally {
-      stoppingMicrophoneSweep.current = false;
+      if (generation === sweepGeneration.current) stoppingMicrophoneSweep.current = false;
     }
   }, [solvePackagePaths, drivenSourceConfigs, fidelity, level2Package, microphonePatternResponses.frequenciesHz, microphoneSweepKey, microphones, rigidMeshById, rigidObjects]);
 
@@ -1548,65 +1549,6 @@ export function App() {
     setTransformMode("select");
   };
 
-  const duplicateSelectedSources = () => {
-    if (selectedSourceIds.length === 0 && selectedRigidIds.length === 0) return;
-    const existingIds = new Set([...sourceConfigs.map((source) => source.id), ...rigidObjects.map((object) => object.id)]);
-    const copies: SourceConfiguration[] = [];
-    for (const source of sourceConfigs.filter((candidate) => selectedSourceIds.includes(candidate.id))) {
-      let suffix = sourceConfigs.length + copies.length + 1;
-      while (existingIds.has(`subwoofer-${suffix}`)) suffix += 1;
-      const id = `subwoofer-${suffix}`;
-      existingIds.add(id);
-      copies.push({
-        ...source,
-        id,
-        name: `${source.name} copy`,
-        positionX: source.positionX + 0.5,
-        positionZ: source.positionZ + 0.5,
-      });
-    }
-    const occupied = [...sourceConfigs.map(buildSourceInstance), ...rigidObjects.map(buildRigidInstance)];
-    const placedCopies = copies.map((copy) => {
-      const placed = findClearSourcePlacement(boundaryAssetById, occupied, buildSourceInstance(copy));
-      occupied.push(placed);
-      return {
-        ...copy,
-        positionX: placed.position[0],
-        positionHeightM: placed.position[1],
-        positionZ: placed.position[2],
-      };
-    });
-    const nextSources = [...sourceConfigs, ...placedCopies];
-    sourceConfigsRef.current = nextSources;
-    setSourceConfigs(nextSources);
-    const rigidCopies: RigidMeshConfiguration[] = [];
-    for (const object of rigidObjects.filter((candidate) => selectedRigidIds.includes(candidate.id))) {
-      let suffix = rigidObjects.length + rigidCopies.length + 1;
-      while (existingIds.has(`rigid-${suffix}`)) suffix += 1;
-      const requested = {
-        ...object,
-        id: `rigid-${suffix}`,
-        name: `${object.name} copy`,
-        positionX: object.positionX + 0.5,
-        positionZ: object.positionZ + 0.5,
-      };
-      existingIds.add(requested.id);
-      const placed = findClearSourcePlacement(boundaryAssetById, occupied, buildRigidInstance(requested));
-      occupied.push(placed);
-      rigidCopies.push({
-        ...requested,
-        positionX: placed.position[0],
-        positionHeightM: placed.position[1],
-        positionZ: placed.position[2],
-      });
-    }
-    const nextRigidObjects = [...rigidObjects, ...rigidCopies];
-    rigidObjectsRef.current = nextRigidObjects;
-    setRigidObjects(nextRigidObjects);
-    setSelectedInstances([...placedCopies.map((source) => source.id), ...rigidCopies.map((object) => object.id)]);
-    setTransformMode("select");
-  };
-
   const addMicrophone = () => {
     const existingIds = new Set([...sourceConfigs.map((source) => source.id), ...microphones.map((microphone) => microphone.id)]);
     let suffix = microphones.length + 1;
@@ -1665,34 +1607,93 @@ export function App() {
     setActiveChannelId(fallback.id);
   };
 
-  const removeSelectedObjects = useCallback(() => {
-    if (!canRemoveSelectedObjects) return;
-    const removedSources = new Set(selectedSourceIds);
-    const removedMicrophones = new Set(selectedMicrophoneIds);
-    const removedRigid = new Set(selectedRigidIds);
-    const removed = new Set([...removedSources, ...removedRigid, ...removedMicrophones]);
-    const nextSources = sourceConfigs.filter((source) => !removedSources.has(source.id));
-    sourceConfigsRef.current = nextSources;
-    setSourceConfigs(nextSources);
-    setMicrophones((current) => current.filter((microphone) => !removedMicrophones.has(microphone.id)));
-    setRigidObjects((current) => current.filter((object) => !removedRigid.has(object.id)));
-    setSelectedInstances((current) => current.filter((id) => !removed.has(id)));
-    setTransformMode("select");
-    if (nextSources.length === 0) {
-      solveGeneration.current += 1;
-      setFidelity("pattern");
-      setLiveSolveEnabled(false);
-      setSolveState("idle");
-      setSolveMessage("Add a speaker object to solve");
+  const syncSceneRefs = () => {
+    const s = editor.present;
+    sourceConfigsRef.current = s.sourceConfigs;
+    rigidObjectsRef.current = s.rigidObjects;
+    microphonesRef.current = s.microphones;
+    observationRef.current = s.observation;
+  };
+  const restoreHistory = (direction: "undo" | "redo") => {
+    editor.end();
+    if (!(direction === "undo" ? editor.getSnapshot().undoLabel : editor.getSnapshot().redoLabel)) return;
+    // Invalidate callbacks synchronously, before restoring a previously used solve key.
+    solveGeneration.current += 1;
+    const generation = ++sweepGeneration.current;
+    microphoneSweepKeyRef.current = null;
+    setLiveSolveEnabled(false);
+    setSolveState("idle");
+    setSolveMessage("Scene restored; solve to update results");
+    setSolvedFields(emptySolvedFieldCache());
+    setBoundaryGeometryKey(null);
+    setBemMicrophoneResponses(null); setDriverExcursion(null); setElectricalResponse(null); setAcousticResponse(null);
+    setRawSweeps({}); setResponseHistory({}); setRetainedExcursion(null); setRetainedElectrical(null);
+    if (microphoneSweepState === "solving") {
+      void window.boundaryLabDesktop?.cancelMicrophoneSweep().catch(() => {}).finally(() => {
+        if (generation === sweepGeneration.current) setMicrophoneSweepState("idle");
+      });
     }
-  }, [canRemoveSelectedObjects, selectedMicrophoneIds, selectedRigidIds, selectedSourceIds, sourceConfigs]);
+    if (microphoneSweepState !== "solving") setMicrophoneSweepState("idle");
+    sourceManipulationRef.current = null;
+    setSpeakerManipulationActive(false);
+    editor[direction]();
+    syncSceneRefs(); setTransformMode("select"); setError(null);
+  };
+  const removeSelectedObjects = () => {
+    const ids = selectedObjectIds(editor.present);
+    if (!ids.size) return;
+    editor.run(`Delete ${ids.size} object${ids.size === 1 ? "" : "s"}`, () => editor.update(removeSelection(editor.present, ids)));
+    syncSceneRefs(); setTransformMode("select");
+    if (!editor.present.sourceConfigs.length) {
+      solveGeneration.current += 1; setLiveSolveEnabled(false); setSolveState("idle"); setSolveMessage("Add a speaker object to solve");
+    }
+  };
+  const clipboardCommand = async (command: "cut" | "copy" | "paste") => {
+    if (clipboardPending.current) return;
+    clipboardPending.current = true;
+    const session = editor.session;
+    const before = editor.present;
+    try {
+      if (command === "paste") {
+        const text = window.boundaryLabDesktop ? await window.boundaryLabDesktop.readSceneClipboard() : browserClipboard.current;
+        if (editor.session !== session) throw new Error("Project changed while reading the clipboard. Paste again.");
+        const next = pasteSelection(editor.present, text, session);
+        editor.run(`Paste ${next.selectedInstances.length} object${next.selectedInstances.length === 1 ? "" : "s"}`,
+          () => editor.update(next));
+        syncSceneRefs(); setTransformMode("select");
+      } else {
+        const text = copySelection(before, session);
+        if (window.boundaryLabDesktop) await window.boundaryLabDesktop.writeSceneClipboard(text);
+        else browserClipboard.current = text;
+        if (command === "cut") {
+          if (editor.session !== session || editor.present !== before) throw new Error("Scene changed during copy. Objects were copied but not cut; try again.");
+          const ids = selectedObjectIds(before);
+          editor.run(`Cut ${ids.size} object${ids.size === 1 ? "" : "s"}`, () => editor.update(removeSelection(before, ids)));
+          syncSceneRefs(); setTransformMode("select");
+          if (!editor.present.sourceConfigs.length) { solveGeneration.current += 1; setLiveSolveEnabled(false); setSolveState("idle"); }
+        }
+      }
+      setError(null);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
+    finally { clipboardPending.current = false; }
+  };
 
   useEffect(() => {
     const keyDown = (event: KeyboardEvent) => {
       if (event.key === "Alt") setAngleSnapDisabled(true);
       const target = event.target;
       const transformableSelected = Boolean(selectedSource) || Boolean(selectedRigid) || Boolean(selectedMicrophone) || selectedInstance === "audience-plane";
-      if (target instanceof Element && target.matches("input, textarea, [contenteditable='true']")) return;
+      if (event.isComposing || (target instanceof Element && target.closest("input:not([type=range]):not([type=checkbox]), textarea, select, [contenteditable]:not([contenteditable='false'])"))) return;
+      if (event.ctrlKey || event.metaKey) {
+        const key = event.key.toLowerCase();
+        if (["x", "c", "v", "z", "y", "d"].includes(key)) event.preventDefault();
+        if (event.repeat) return;
+        if (key === "z") restoreHistory(event.shiftKey ? "redo" : "undo");
+        else if (key === "y") restoreHistory("redo");
+        else if (key === "x" || key === "c" || key === "v") void clipboardCommand(key === "x" ? "cut" : key === "c" ? "copy" : "paste");
+        return;
+      }
+      if (event.altKey) return;
       if (event.key.toLowerCase() === "q") {
         event.preventDefault();
         setTransformMode("select");
@@ -1701,11 +1702,6 @@ export function App() {
       if ((event.key === "Delete" || event.key === "Backspace") && canRemoveSelectedObjects) {
         event.preventDefault();
         removeSelectedObjects();
-        return;
-      }
-      if (event.ctrlKey && event.key.toLowerCase() === "d" && (selectedSourceIds.length > 0 || selectedRigidIds.length > 0)) {
-        event.preventDefault();
-        duplicateSelectedSources();
         return;
       }
       if (!transformableSelected) return;
@@ -1732,7 +1728,7 @@ export function App() {
       window.removeEventListener("keyup", keyUp);
       window.removeEventListener("blur", windowBlur);
     };
-  }, [canRemoveSelectedObjects, removeSelectedObjects, selectedInstance, selectedMicrophone, selectedRigid, selectedRigidIds, selectedSource, selectedSourceIds]);
+  });
 
   useEffect(() => {
     if (!liveSolveEnabled || fidelity === "pattern" || !selectedSolverAvailable) {
@@ -1815,8 +1811,8 @@ export function App() {
 
   useEffect(() => {
     if (fidelity === "pattern" || !selectedSolverAvailable) setLiveSolveEnabled(false);
-    if (fidelity === "boundary" && !boundaryAvailable) setFidelity("pattern");
-    if (fidelity === "coupled" && !coupledAvailable) setFidelity("pattern");
+    if (fidelity === "boundary" && !boundaryAvailable) editor.set("fidelity", "pattern", false);
+    if (fidelity === "coupled" && !coupledAvailable) editor.set("fidelity", "pattern", false);
   }, [boundaryAvailable, coupledAvailable, fidelity, selectedSolverAvailable]);
 
   return (
@@ -1895,7 +1891,6 @@ export function App() {
                 <div className="section-actions">
                   <button className="section-action" title="Add active speaker" aria-label="Add speaker" onClick={() => addSource()}><Plus size={14} /></button>
                   <button className="section-action" title="Add active rigid mesh" aria-label="Add rigid object" disabled={!activeRigidMeshId} onClick={() => addRigidObject()}><Box size={13} /></button>
-                  <button className="section-action" title="Duplicate selected boundary objects (Ctrl+D)" aria-label="Duplicate selected boundary objects" disabled={selectedSourceIds.length === 0 && selectedRigidIds.length === 0} onClick={duplicateSelectedSources}><Copy size={13} /></button>
                   <button className="section-action" title="Add microphone" aria-label="Add microphone" onClick={addMicrophone}><Mic2 size={14} /></button>
                   <button
                     className="section-action"
@@ -1918,7 +1913,6 @@ export function App() {
                 <div className="section-actions">
                   <button className="section-action" title="Add active speaker" aria-label="Add speaker" onClick={() => addSource()}><Plus size={14} /></button>
                   <button className="section-action" title="Add active rigid mesh" aria-label="Add rigid object" disabled={!activeRigidMeshId} onClick={() => addRigidObject()}><Box size={13} /></button>
-                  <button className="section-action" title="Duplicate selected boundary objects (Ctrl+D)" aria-label="Duplicate selected boundary objects" disabled={selectedSourceIds.length === 0 && selectedRigidIds.length === 0} onClick={duplicateSelectedSources}><Copy size={13} /></button>
                   <button className="section-action" title="Add microphone" aria-label="Add microphone" onClick={addMicrophone}><Mic2 size={14} /></button>
                   <button
                     className="section-action"
@@ -1991,8 +1985,6 @@ export function App() {
           <button className={transformMode === "translate" ? "active" : ""} disabled={!selectedInstance} title="Translate (W)" onClick={() => setTransformMode("translate")}><Move3D size={15} /></button>
           <button className={transformMode === "rotate" ? "active" : ""} disabled={!selectedInstance || Boolean(selectedMicrophone)} title="Rotate (E)" onClick={() => setTransformMode("rotate")}><Rotate3D size={15} /></button>
           <button className={transformMode === "scale" ? "active" : ""} disabled={selectedInstance !== "audience-plane"} title="Resize plane (R)" onClick={() => setTransformMode("scale")}><Maximize2 size={15} /></button>
-          <span />
-          <button><Menu size={15} /></button>
         </div>
         <div className="solve-status" data-solve-revision={solveRevision}>
           <span className={solveState === "solving" ? "live-dot solving" : "live-dot"} />

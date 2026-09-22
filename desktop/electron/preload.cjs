@@ -1,6 +1,8 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("boundaryLabDesktop", {
+  readSceneClipboard: () => ipcRenderer.invoke("deploy:read-scene-clipboard"),
+  writeSceneClipboard: (text) => ipcRenderer.invoke("deploy:write-scene-clipboard", text),
   loadBundledExample: () => ipcRenderer.invoke("deploy:load-bundled-example"),
   openProject: () => ipcRenderer.invoke("deploy:open-project"),
   openSpeakerPackage: () => ipcRenderer.invoke("deploy:open-speaker-package"),

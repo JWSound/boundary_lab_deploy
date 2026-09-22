@@ -35,3 +35,7 @@ jobs:
         working-directory: desktop
       - run: npm run test:viewport-rendering
         working-directory: desktop
+      - run: npm run test:editing
+        working-directory: desktop
+      - run: npm run test:editing-ui
+        working-directory: desktop
