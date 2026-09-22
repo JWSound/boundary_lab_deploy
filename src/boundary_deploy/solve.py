@@ -774,6 +774,7 @@ def prepare_deploy_solve_request(
     *,
     cache: DeploySolveCache | None = None,
     status_callback: Callable[[str], None] | None = None,
+    _serialize: bool = True,
 ) -> tuple[Path, dict[str, Any]]:
     """Validate a renderer request and stage fixed-source instances for BEAT."""
 
@@ -953,180 +954,209 @@ def prepare_deploy_solve_request(
                 f"Deploy boundary object {component.id!r} extends {abs(minimum_y):.6f} m below the ground plane."
             )
 
-    proximity_pairs: list[dict[str, Any]] = []
-    close_face_pairs: list[list[int]] = []
-    minimum_surface_distance_m: float | None = None
-    if status_callback is not None:
-        status_callback("Validating boundary spacing")
-    for first_index in range(len(components)):
-        for second_index in range(first_index + 1, len(components)):
-            first = components[first_index]
-            second = components[second_index]
-            first_minimum = np.min(first.points, axis=0)
-            first_maximum = np.max(first.points, axis=0)
-            second_minimum = np.min(second.points, axis=0)
-            second_maximum = np.max(second.points, axis=0)
-            object_separation = np.maximum(
-                0.0,
-                np.maximum(first_minimum - second_maximum, second_minimum - first_maximum),
-            )
-            object_distance_m = float(np.linalg.norm(object_separation))
-            violation = (
-                first_surface_pair_within(
-                    first.points,
-                    first.triangles,
-                    second.points,
-                    second.triangles,
-                    max(0.0, SOURCE_SURFACE_PADDING_M - GROUND_TOLERANCE_M),
-                )
-                if object_distance_m < SOURCE_SURFACE_PADDING_M
-                else None
-            )
-            if violation is not None:
-                raise ValueError(
-                    f"Deploy boundary objects {first.id!r} and {second.id!r} have "
-                    f"{violation.distance_m * 1000.0:.3f} mm surface spacing; at least "
-                    f"{SOURCE_SURFACE_PADDING_M * 1000.0:.1f} mm is required."
-                )
-            face_pairs = (
-                surface_face_pairs_within(
-                    first.points,
-                    first.triangles,
-                    second.points,
-                    second.triangles,
-                    CLOSE_PAIR_DISTANCE_M,
-                    exact=False,
-                )
-                if object_distance_m <= CLOSE_PAIR_DISTANCE_M
-                else []
-            )
-            distance_m = min((item.distance_m for item in face_pairs), default=object_distance_m)
-            minimum_surface_distance_m = (
-                distance_m if minimum_surface_distance_m is None else min(minimum_surface_distance_m, distance_m)
-            )
-            pair = {
-                "source_a": first.id,
-                "source_b": second.id,
-                "kind_a": first.kind,
-                "kind_b": second.kind,
-                "distance_m": distance_m,
-                "face_a": face_pairs[0].face_a if face_pairs else -1,
-                "face_b": face_pairs[0].face_b if face_pairs else -1,
-                "close": bool(face_pairs),
-            }
-            if pair["close"]:
-                for face_pair in face_pairs:
-                    first_face = first.face_offset + face_pair.face_a
-                    second_face = second.face_offset + face_pair.face_b
-                    correction_order = (
-                        close_pair_quadrature_order
-                        if close_pair_quadrature_override is not None
-                        else (8 if face_pair.distance_m <= 0.015 else 6 if face_pair.distance_m <= 0.03 else 4)
-                    )
-                    close_face_pairs.append([first_face, second_face, correction_order])
-                    close_face_pairs.append([second_face, first_face, correction_order])
-                pair["near_face_pair_count"] = len(face_pairs)
-            else:
-                pair["near_face_pair_count"] = 0
-            proximity_pairs.append(pair)
-
-    # A rigid half-space Green's function adds a positive image of every
-    # cabinet boundary across the world Y=0 plane. Correct its near interactions
-    # with the same tiered quadrature used for adjacent real cabinets. Exact
-    # coincident/edge/vertex image pairs are omitted here because BEAT's image
-    # Duffy cache owns those singular interactions. Use conservative face-AABB
-    # distances for the correction tiers, matching the direct close-pair path;
-    # exact scalar triangle distances are too costly for interactive staging.
-    if status_callback is not None:
-        status_callback("Building close-pair correction map")
-    ground_image_face_pairs: list[list[int]] = []
-    singular_tolerance_squared = GROUND_IMAGE_SINGULAR_TOLERANCE_M**2
-    reflected_components = []
+    # One bounded cache entry, keyed by actual transformed geometry and all
+    # correction settings. Drives/frequency/observation do not affect proximity.
+    proximity_digest = hashlib.sha256()
+    proximity_digest.update(repr((SOURCE_SURFACE_PADDING_M, GROUND_TOLERANCE_M,
+        CLOSE_PAIR_DISTANCE_M, GROUND_IMAGE_SINGULAR_TOLERANCE_M,
+        close_pair_quadrature_order, close_pair_quadrature_override)).encode())
     for component in components:
-        reflected = component.points.copy()
-        reflected[:, 1] *= -1.0
-        reflected_components.append(reflected)
-
-    def non_singular_ground_pairs(
-        test_component: DeployBoundaryComponent,
-        trial_component: DeployBoundaryComponent,
-        trial_points: np.ndarray,
-    ) -> list[Any]:
-        test_faces = test_component.points[test_component.triangles]
-        trial_faces = trial_points[trial_component.triangles]
-        filtered = []
-        for face_pair in surface_face_pairs_within(
-            test_component.points,
-            test_component.triangles,
-            trial_points,
-            trial_component.triangles,
-            CLOSE_PAIR_DISTANCE_M,
-            exact=False,
-        ):
-            vertex_deltas = (
-                test_faces[face_pair.face_a, :, np.newaxis, :] - trial_faces[face_pair.face_b, np.newaxis, :, :]
-            )
-            if np.any(np.sum(vertex_deltas * vertex_deltas, axis=2) <= singular_tolerance_squared):
-                continue
-            filtered.append(face_pair)
-        return filtered
-
-    ground_pair_cache = cache.ground_image_pairs if cache is not None else {}
-    ground_pair_sets: list[tuple[int, int, list[Any]]] = []
-    for component_index, component in enumerate(components):
-        self_key = (
-            component.fingerprint,
-            hash(component.points.tobytes()),
-            float(np.min(component.points[:, 1])),
-            float(np.max(component.points[:, 1])),
-            component.points.shape[0],
-        )
-        self_pairs = ground_pair_cache.get(self_key)
-        if self_pairs is None:
-            self_pairs = non_singular_ground_pairs(component, component, reflected_components[component_index])
-            ground_pair_cache[self_key] = self_pairs
-        ground_pair_sets.append((component_index, component_index, self_pairs))
-
-    close_distance_squared = CLOSE_PAIR_DISTANCE_M**2
-    for test_index, test_component in enumerate(components):
-        test_minimum = np.min(test_component.points, axis=0)
-        test_maximum = np.max(test_component.points, axis=0)
-        for trial_index, trial_points in enumerate(reflected_components):
-            if test_index == trial_index:
-                continue
-            trial_minimum = np.min(trial_points, axis=0)
-            trial_maximum = np.max(trial_points, axis=0)
-            separation = np.maximum(
-                0.0,
-                np.maximum(test_minimum - trial_maximum, trial_minimum - test_maximum),
-            )
-            if float(np.dot(separation, separation)) > close_distance_squared:
-                continue
-            ground_pair_sets.append(
-                (
-                    test_index,
-                    trial_index,
-                    non_singular_ground_pairs(test_component, components[trial_index], trial_points),
+        proximity_digest.update(repr((component.id, component.kind, component.fingerprint,
+            component.face_offset, component.vertex_offset)).encode())
+        proximity_digest.update(component.points.tobytes())
+        proximity_digest.update(component.triangles.tobytes())
+    proximity_key = proximity_digest.hexdigest()
+    cached_proximity = getattr(cache, "proximity_geometry", None)
+    if cached_proximity is not None and cached_proximity[0] == proximity_key:
+        cached_pairs, cached_close, cached_ground, minimum_surface_distance_m = cached_proximity[1]
+        proximity_pairs = [dict(pair) for pair in cached_pairs]
+        close_face_pairs = [list(pair) for pair in cached_close]
+        ground_image_face_pairs = [list(pair) for pair in cached_ground]
+        if status_callback is not None:
+            status_callback("Reusing validated boundary proximity")
+    else:
+        proximity_pairs: list[dict[str, Any]] = []
+        close_face_pairs: list[list[int]] = []
+        minimum_surface_distance_m: float | None = None
+        if status_callback is not None:
+            status_callback("Validating boundary spacing")
+        for first_index in range(len(components)):
+            for second_index in range(first_index + 1, len(components)):
+                first = components[first_index]
+                second = components[second_index]
+                first_minimum = np.min(first.points, axis=0)
+                first_maximum = np.max(first.points, axis=0)
+                second_minimum = np.min(second.points, axis=0)
+                second_maximum = np.max(second.points, axis=0)
+                object_separation = np.maximum(
+                    0.0,
+                    np.maximum(first_minimum - second_maximum, second_minimum - first_maximum),
                 )
-            )
+                object_distance_m = float(np.linalg.norm(object_separation))
+                violation = (
+                    first_surface_pair_within(
+                        first.points,
+                        first.triangles,
+                        second.points,
+                        second.triangles,
+                        max(0.0, SOURCE_SURFACE_PADDING_M - GROUND_TOLERANCE_M),
+                    )
+                    if object_distance_m < SOURCE_SURFACE_PADDING_M
+                    else None
+                )
+                if violation is not None:
+                    raise ValueError(
+                        f"Deploy boundary objects {first.id!r} and {second.id!r} have "
+                        f"{violation.distance_m * 1000.0:.3f} mm surface spacing; at least "
+                        f"{SOURCE_SURFACE_PADDING_M * 1000.0:.1f} mm is required."
+                    )
+                face_pairs = (
+                    surface_face_pairs_within(
+                        first.points,
+                        first.triangles,
+                        second.points,
+                        second.triangles,
+                        CLOSE_PAIR_DISTANCE_M,
+                        exact=False,
+                    )
+                    if object_distance_m <= CLOSE_PAIR_DISTANCE_M
+                    else []
+                )
+                distance_m = min((item.distance_m for item in face_pairs), default=object_distance_m)
+                minimum_surface_distance_m = (
+                    distance_m if minimum_surface_distance_m is None else min(minimum_surface_distance_m, distance_m)
+                )
+                pair = {
+                    "source_a": first.id,
+                    "source_b": second.id,
+                    "kind_a": first.kind,
+                    "kind_b": second.kind,
+                    "distance_m": distance_m,
+                    "face_a": face_pairs[0].face_a if face_pairs else -1,
+                    "face_b": face_pairs[0].face_b if face_pairs else -1,
+                    "close": bool(face_pairs),
+                }
+                if pair["close"]:
+                    for face_pair in face_pairs:
+                        first_face = first.face_offset + face_pair.face_a
+                        second_face = second.face_offset + face_pair.face_b
+                        correction_order = (
+                            close_pair_quadrature_order
+                            if close_pair_quadrature_override is not None
+                            else (8 if face_pair.distance_m <= 0.015 else 6 if face_pair.distance_m <= 0.03 else 4)
+                        )
+                        close_face_pairs.append([first_face, second_face, correction_order])
+                        close_face_pairs.append([second_face, first_face, correction_order])
+                    pair["near_face_pair_count"] = len(face_pairs)
+                else:
+                    pair["near_face_pair_count"] = 0
+                proximity_pairs.append(pair)
 
-    for test_index, trial_index, face_pairs in ground_pair_sets:
-        test_component = components[test_index]
-        trial_component = components[trial_index]
-        for face_pair in face_pairs:
-            correction_order = (
-                close_pair_quadrature_order
-                if close_pair_quadrature_override is not None
-                else (8 if face_pair.distance_m <= 0.015 else 6 if face_pair.distance_m <= 0.03 else 4)
+        # A rigid half-space Green's function adds a positive image of every
+        # cabinet boundary across the world Y=0 plane. Correct its near interactions
+        # with the same tiered quadrature used for adjacent real cabinets. Exact
+        # coincident/edge/vertex image pairs are omitted here because BEAT's image
+        # Duffy cache owns those singular interactions. Use conservative face-AABB
+        # distances for the correction tiers, matching the direct close-pair path;
+        # exact scalar triangle distances are too costly for interactive staging.
+        if status_callback is not None:
+            status_callback("Building close-pair correction map")
+        ground_image_face_pairs: list[list[int]] = []
+        singular_tolerance_squared = GROUND_IMAGE_SINGULAR_TOLERANCE_M**2
+        reflected_components = []
+        for component in components:
+            reflected = component.points.copy()
+            reflected[:, 1] *= -1.0
+            reflected_components.append(reflected)
+
+        def non_singular_ground_pairs(
+            test_component: DeployBoundaryComponent,
+            trial_component: DeployBoundaryComponent,
+            trial_points: np.ndarray,
+        ) -> list[Any]:
+            test_faces = test_component.points[test_component.triangles]
+            trial_faces = trial_points[trial_component.triangles]
+            filtered = []
+            for face_pair in surface_face_pairs_within(
+                test_component.points,
+                test_component.triangles,
+                trial_points,
+                trial_component.triangles,
+                CLOSE_PAIR_DISTANCE_M,
+                exact=False,
+            ):
+                vertex_deltas = (
+                    test_faces[face_pair.face_a, :, np.newaxis, :] - trial_faces[face_pair.face_b, np.newaxis, :, :]
+                )
+                if np.any(np.sum(vertex_deltas * vertex_deltas, axis=2) <= singular_tolerance_squared):
+                    continue
+                filtered.append(face_pair)
+            return filtered
+
+        ground_pair_cache = cache.ground_image_pairs if cache is not None else {}
+        ground_pair_sets: list[tuple[int, int, list[Any]]] = []
+        for component_index, component in enumerate(components):
+            self_key = (
+                component.fingerprint,
+                hash(component.points.tobytes()),
+                float(np.min(component.points[:, 1])),
+                float(np.max(component.points[:, 1])),
+                component.points.shape[0],
             )
-            ground_image_face_pairs.append(
-                [
-                    test_component.face_offset + face_pair.face_a,
-                    trial_component.face_offset + face_pair.face_b,
-                    correction_order,
-                ]
-            )
-    ground_image_face_pairs.sort(key=lambda pair: (pair[0], pair[1]))
+            self_pairs = ground_pair_cache.get(self_key)
+            if self_pairs is None:
+                self_pairs = non_singular_ground_pairs(component, component, reflected_components[component_index])
+                ground_pair_cache[self_key] = self_pairs
+            ground_pair_sets.append((component_index, component_index, self_pairs))
+
+        close_distance_squared = CLOSE_PAIR_DISTANCE_M**2
+        for test_index, test_component in enumerate(components):
+            test_minimum = np.min(test_component.points, axis=0)
+            test_maximum = np.max(test_component.points, axis=0)
+            for trial_index, trial_points in enumerate(reflected_components):
+                if test_index == trial_index:
+                    continue
+                trial_minimum = np.min(trial_points, axis=0)
+                trial_maximum = np.max(trial_points, axis=0)
+                separation = np.maximum(
+                    0.0,
+                    np.maximum(test_minimum - trial_maximum, trial_minimum - test_maximum),
+                )
+                if float(np.dot(separation, separation)) > close_distance_squared:
+                    continue
+                ground_pair_sets.append(
+                    (
+                        test_index,
+                        trial_index,
+                        non_singular_ground_pairs(test_component, components[trial_index], trial_points),
+                    )
+                )
+
+        for test_index, trial_index, face_pairs in ground_pair_sets:
+            test_component = components[test_index]
+            trial_component = components[trial_index]
+            for face_pair in face_pairs:
+                correction_order = (
+                    close_pair_quadrature_order
+                    if close_pair_quadrature_override is not None
+                    else (8 if face_pair.distance_m <= 0.015 else 6 if face_pair.distance_m <= 0.03 else 4)
+                )
+                ground_image_face_pairs.append(
+                    [
+                        test_component.face_offset + face_pair.face_a,
+                        trial_component.face_offset + face_pair.face_b,
+                        correction_order,
+                    ]
+                )
+        ground_image_face_pairs.sort(key=lambda pair: (pair[0], pair[1]))
+
+        if isinstance(cache, DeploySolveCache):
+            cache.proximity_geometry = (proximity_key, (
+                tuple(dict(pair) for pair in proximity_pairs),
+                tuple(tuple(pair) for pair in close_face_pairs),
+                tuple(tuple(pair) for pair in ground_image_face_pairs),
+                minimum_surface_distance_m,
+            ))
 
     q_neumann = np.concatenate([component.q_neumann for component in components])
     reference_pressure = np.concatenate([component.reference_pressure for component in components])
@@ -1256,7 +1286,8 @@ def prepare_deploy_solve_request(
     if status_callback is not None:
         status_callback("Serializing BEAT request")
     request_path = work_path / "request.json"
-    _write_deploy_request(request_path, request)
+    if _serialize:
+        _write_deploy_request(request_path, request)
     return request_path, request
 
 
@@ -1294,7 +1325,7 @@ def _prepare_scene_rom(
 
     geometry_payload = {**payload, "frequencyHz": frequencies[0] if sweep else payload.get("frequencyHz")}
     request_path, geometry = prepare_deploy_solve_request(
-        geometry_payload, work_dir, cache=cache, status_callback=status_callback,
+        geometry_payload, work_dir, cache=cache, status_callback=status_callback, _serialize=False,
     )
     sources = payload["sources"]
     by_source = {c["id"]: c for c in geometry["boundary_components"]}
@@ -1310,7 +1341,7 @@ def _prepare_scene_rom(
         local_geometry = {**geometry, "boundary_components": [by_source[s["id"]] for s in subset]}
         _, local = prepare(
             local_payload, Path(work_dir) / f"model-{index}", cache=cache,
-            status_callback=status_callback, boundary_request=local_geometry,
+            status_callback=status_callback, boundary_request=local_geometry, _serialize=False,
         )
         model = local["rom_sweep" if sweep else "rom"]
         models[package_id] = model
@@ -1385,6 +1416,7 @@ def _prepare_single_rom_request(
     cache: DeploySolveCache | None = None,
     boundary_request: dict[str, Any] | None = None,
     status_callback: Callable[[str], None] | None = None,
+    _serialize: bool = True,
 ) -> tuple[Path, dict[str, Any]]:
     """Build a matrix-free Schur-eliminated Deploy request for a parity ROM."""
 
@@ -1401,12 +1433,12 @@ def _prepare_single_rom_request(
 
     if boundary_request is None:
         request_path, request = prepare_deploy_solve_request(
-            payload, work_dir, cache=cache, status_callback=status_callback,
+            payload, work_dir, cache=cache, status_callback=status_callback, _serialize=False,
         )
     else:
         Path(work_dir).mkdir(parents=True, exist_ok=True)
         request_path = Path(work_dir) / "request.json"
-        request = copy.deepcopy(boundary_request)
+        request = {**boundary_request, "provenance": dict(boundary_request["provenance"])}
     requested_frequency = float(request["frequency_hz"])
     rom_frequencies = np.asarray(arrays["frequencies_hz"], dtype=np.float64)
     if rom_frequencies.size == 0 or not np.all(np.isfinite(rom_frequencies)):
@@ -1544,7 +1576,8 @@ def _prepare_single_rom_request(
         transducers=transducers,
         speakers=speakers,
     )
-    _write_deploy_request(request_path, request)
+    if _serialize:
+        _write_deploy_request(request_path, request)
     if status_callback is not None:
         status_callback(f"Prepared rank-{rank} parity-ROM boundary feedback")
     return request_path, request
@@ -1557,6 +1590,7 @@ def _prepare_single_rom_sweep_request(
     cache: DeploySolveCache | None = None,
     boundary_request: dict[str, Any] | None = None,
     status_callback: Callable[[str], None] | None = None,
+    _serialize: bool = True,
 ) -> tuple[Path, dict[str, Any]]:
     """Build one geometry-cached microphone sweep for a parity speaker ROM."""
 
@@ -1603,7 +1637,7 @@ def _prepare_single_rom_sweep_request(
     else:
         request_path, request = _prepare_single_rom_request(
             first_payload, work_dir, cache=cache, status_callback=status_callback,
-            boundary_request=boundary_request,
+            boundary_request=boundary_request, _serialize=False,
         )
     base_rom = request["rom"]
     base_instances = list(base_rom["instances"])
@@ -1689,7 +1723,8 @@ def _prepare_single_rom_sweep_request(
     request["provenance"]["rom_sweep_stage_binary_bytes_written"] = binary_bytes_written
     if status_callback is not None:
         status_callback(f"Serializing {len(frequency_pairs)}-frequency Level 3 ROM sweep")
-    _write_deploy_request(request_path, request)
+    if _serialize:
+        _write_deploy_request(request_path, request)
     return request_path, request
 
 

@@ -283,3 +283,94 @@ def test_speaker_electrical_result_sums_coil_current_per_cabinet() -> None:
     assert electrical["voltage_real"] == [2.83]
     assert electrical["current_real"] == pytest.approx([0.5])
     assert electrical["current_imag"] == pytest.approx([-0.05])
+
+
+def test_solution_identity_excludes_planes_but_tracks_physics_and_files(tmp_path):
+    package = tmp_path / "speaker.blabsp"
+    package.write_bytes(b"package")
+    mesh = tmp_path / "rigid.msh"
+    mesh.write_bytes(b"mesh")
+    payload = {"packagePaths": {"a": str(package)}, "frequencyHz": 40,
+               "sources": [{"id": "a", "levelDb": 0, "delayMs": 0}],
+               "fidelity": "coupled", "rigidObjects": [{"meshPath": str(mesh)}]}
+    key = deploy_worker._solution_identity(payload)
+    assert deploy_worker._solution_identity({**payload, "observation": {"heightM": 4},
+        "reuseBoundary": True, "solutionKey": "untrusted", "includeComplexPressure": True}) == key
+    for change in [{"frequencyHz": 80}, {"fidelity": "boundary"},
+                   {"sources": [{"id": "a", "levelDb": 1, "delayMs": 0}]},
+                   {"sources": [{"id": "a", "levelDb": 0, "delayMs": 1}]}]:
+        assert deploy_worker._solution_identity({**payload, **change}) != key
+    package.write_bytes(b"changed package")
+    assert deploy_worker._solution_identity(payload) != key
+    key = deploy_worker._solution_identity(payload)
+    mesh.write_bytes(b"changed mesh")
+    assert deploy_worker._solution_identity(payload) != key
+
+
+def test_solve_reuse_validates_physics_and_invalidates_failed_jobs(tmp_path, monkeypatch):
+    package = tmp_path / "speaker.blabsp"
+    package.write_bytes(b"package")
+    payload = {"packagePath": str(package), "fidelity": "coupled", "frequencyHz": 40,
+               "sources": [{"levelDb": 0}], "solutionKey": "same-renderer-key"}
+    monkeypatch.setattr(deploy_worker, "_execution_worker_key", lambda *_: "cuda")
+    monkeypatch.setattr(deploy_worker, "_emit", lambda *a, **k: {"json_encode_s": 0, "stdout_bytes": 0})
+    def prepare(payload, directory, **kwargs):
+        path = Path(directory) / "request.json"
+        path.write_text("{}")
+        return path, {"solution_key": payload["solutionKey"]}
+    monkeypatch.setattr(deploy_worker, "prepare_deploy_rom_request", prepare)
+    monkeypatch.setattr(deploy_worker, "prepare_deploy_field_request", prepare)
+    class Worker:
+        operations = []
+        fail = False
+        def submit(self, path, **kwargs):
+            self.operations.append(kwargs["operation"])
+            if self.fail:
+                raise RuntimeError("worker failed")
+            yield {"type": "result", "result": {}}
+            yield {"type": "completed"}
+    worker = Worker()
+    keys = {}
+    def run(value):
+        deploy_worker._solve(1, value, {"cuda": worker}, {}, None, keys)
+    run(payload)
+    run({**payload, "reuseBoundary": True, "observation": {"heightM": 3}})
+    run({**payload, "reuseBoundary": True, "observation": {"heightM": 4}})
+    run({**payload, "reuseBoundary": True, "sources": [{"levelDb": 2}]})
+    assert worker.operations == ["solve", "field", "field", "solve"]
+    worker.fail = True
+    with pytest.raises(RuntimeError, match="worker failed"):
+        run(payload)
+    assert keys == {}
+
+
+def test_completion_follows_cleanup_and_accepts_immediate_next_job(monkeypatch):
+    import io
+    cleaned = []
+    completed = threading.Event()
+    output = io.StringIO()
+    class Output:
+        def write(self, text):
+            message = json.loads(text)
+            if message["type"] == "completed":
+                assert message["id"] in cleaned
+                completed.set()
+            return output.write(text)
+        def flush(self):
+            pass
+    def solve(request_id, *args):
+        deploy_worker._emit("completed", request_id=request_id)
+        cleaned.append(request_id)
+    def lines():
+        for request_id in (1, 2):
+            completed.clear()
+            yield json.dumps({"id": request_id, "operation": "solve", "payload": {}})
+            assert completed.wait(5)
+    monkeypatch.setattr(deploy_worker, "_solve", solve)
+    monkeypatch.setattr(deploy_worker, "_execution_worker_key", lambda *_: "cuda")
+    monkeypatch.setattr(deploy_worker.sys, "stdin", lines())
+    monkeypatch.setattr(deploy_worker.sys, "stdout", Output())
+    assert deploy_worker.main() == 0
+    events = [json.loads(line) for line in output.getvalue().splitlines()]
+    assert [event["id"] for event in events if event["type"] == "completed"] == [1, 2]
+    assert not any(event["type"] == "failed" for event in events)
