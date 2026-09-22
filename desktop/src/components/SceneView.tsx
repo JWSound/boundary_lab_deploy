@@ -1513,6 +1513,11 @@ function SpeakerSelectionControls({
 }
 
 function AcousticScene(props: SceneViewProps) {
+  const invalidate = useThree((state) => state.invalidate);
+  // Uniform and ref mutations are invisible to Fiber's prop-change detection.
+  // Request a frame after each scene commit, including child effects that reset
+  // heatmap phase or reposition selection controls. This does not keep a loop alive.
+  useEffect(() => { invalidate(); });
   const selectedInstances = new Set(props.selectedInstances);
   const boundaryAssets: BoundaryMeshAsset[] = [...props.packages, ...props.rigidMeshes];
   const allBoundaryObjects = [...props.sources, ...props.rigidObjects];
@@ -1644,6 +1649,7 @@ function AcousticScene(props: SceneViewProps) {
 export function SceneView(props: SceneViewProps) {
   return (
     <Canvas
+      frameloop={props.phaseAnimationEnabled && props.observation.displayMode !== "spl" ? "always" : "demand"}
       shadows
       dpr={[1, 1.7]}
       camera={{ position: [9.5, 7.5, 13.5], fov: 44, near: 0.05, far: 300 }}
