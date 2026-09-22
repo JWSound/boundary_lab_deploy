@@ -1,7 +1,6 @@
 # Filter bank calculation contract
 
-Project schema 10 enables channel and speaker-object filter banks. The editor UI
-is a separate follow-up; the existing EQ dialog remains informational. Versions
+Project schema 10 enables channel and speaker-object filter banks. The EQ dialog edits eight slots below a magnitude/phase preview. Versions
 5-9 still load with their original gain behavior. Empty banks are unity. Older
 Deploy versions reject schema 10 projects.
 
@@ -57,3 +56,26 @@ reference values and analytic PEQ/shelf/all-pass points consumed by Python and
 TypeScript. Additional tests cover reciprocal PEQ, endpoint behavior, bypass,
 phase-sensitive interference, all preparation paths, persistence, and history.
 Run `pytest`, `npm run test:filters`, and `npm run test:pattern` for those checks.
+
+## Editor layout
+
+Open speaker EQ from an object's inspector or channel EQ from Channels. The
+preview shows this bank's response, excluding system/channel/object level and
+delay. Hover to inspect frequency, magnitude, and phase. Bypass shows unity
+response without deleting settings.
+
+Eight columns sit below the plot. High-pass and low-pass occupy the ends, with
+Family, Cutoff, Slope, and disabled Q rows. Middle columns offer PEQ, Low shelf,
+High shelf, and Allpass, with Frequency, Gain, and Q. Allpass disables Gain.
+The crossover family determines Q; changing from an odd Butterworth order to
+Linkwitz-Riley selects the next valid even order. Each slot has its own enable
+switch. Numeric values commit on Enter or leaving the field, clamp to the
+supported range, and reject blank/invalid entries. Escape cancels a numeric
+edit; Escape elsewhere closes the dialog. Edits participate in project history.
+
+Opening a bank does not modify it. Empty slots are disabled; editing one creates
+only that slot. Slot IDs preserve column placement on reopen. Existing imported
+filters fill compatible slots, while additional filters remain intact and are
+included in the preview. The dialog reports their count. At the backend limit
+of 64 filters, existing slots remain editable but empty slots cannot be added.
+On narrow windows the bank scrolls horizontally, preserving its column layout.
