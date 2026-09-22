@@ -216,8 +216,9 @@ power. Single-cabinet comparisons use explicit one-cabinet scene captures, with
 the same rigid-ground assumption as other scenes. There is no automatic isolated
 free-field reference.
 
-Project schema v7 stores configuration and external asset references; v5/v6 are
-accepted. It does not embed result caches or captures. Capture downloads use
+Project schema v8 stores configuration, an audience-plane collection, and external
+asset references; v5/v6/v7 are accepted and their single plane is migrated. Empty
+projects need neither packages nor planes. It does not embed result caches or captures. Capture downloads use
 `.blabanalysis.json`, serializing arrays/maps and missing numeric values as JSON
 nulls. Import is not implemented. For reproducibility, retain the referenced
 packages/meshes and their versions as well as configuration and downloaded data.

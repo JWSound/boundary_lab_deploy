@@ -84,6 +84,7 @@ export function PackageCard({
 }
 
 export function SceneTree({
+  audiencePlanes,
   packages,
   rigidMeshes,
   sources,
@@ -93,6 +94,7 @@ export function SceneTree({
   activeId,
   onSelect,
 }: {
+  audiencePlanes: import("../model/types").AudiencePlane[];
   packages: LoadedSpeakerPackage[];
   rigidMeshes: RigidMeshAsset[];
   sources: SourceConfiguration[];
@@ -136,12 +138,12 @@ export function SceneTree({
           onClick={(event) => select(microphone.id, event)}
         ><Mic2 size={15} /><span>{microphone.name}</span><em>MIC</em></button>
       ))}
-      <button
-        data-object-id="audience-plane"
-        aria-selected={selectedIds.includes("audience-plane")}
-        className={`tree-row tree-button ${selectedIds.includes("audience-plane") ? "selected" : ""} ${activeId === "audience-plane" ? "active-selection" : ""}`}
-        onClick={(event) => select("audience-plane", event)}
-      ><Grid3X3 size={15} /><span>Audience plane</span><em>PLANE</em></button>
+      {audiencePlanes.map(plane => <button key={plane.id}
+        data-object-id={plane.id}
+        aria-selected={selectedIds.includes(plane.id)}
+        className={`tree-row tree-button ${selectedIds.includes(plane.id) ? "selected" : ""} ${activeId === plane.id ? "active-selection" : ""}`}
+        onClick={(event) => select(plane.id, event)}
+      ><Grid3X3 size={15} /><span>{plane.name}</span><em>PLANE</em></button>)}
     </div>
   );
 }

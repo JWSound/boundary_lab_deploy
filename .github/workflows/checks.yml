@@ -39,3 +39,5 @@ jobs:
         working-directory: desktop
       - run: npm run test:editing-ui
         working-directory: desktop
+      - run: npm run test:projects
+        working-directory: desktop

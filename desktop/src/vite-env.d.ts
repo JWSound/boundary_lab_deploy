@@ -6,6 +6,10 @@ interface DesktopPackageSelection {
   bytes: ArrayBuffer;
 }
 
+interface RecentProject {
+  path: string; name: string; openedAt: string; modifiedAt: string | null; available: boolean;
+}
+
 interface DesktopProjectSelection {
   name: string;
   path: string;
@@ -73,7 +77,9 @@ interface Window {
     readSceneClipboard: () => Promise<string>;
     writeSceneClipboard: (text: string) => Promise<void>;
     loadBundledExample: () => Promise<DesktopPackageSelection | null>;
-    openProject: () => Promise<DesktopProjectSelection | null>;
+    openProject: (path?: string) => Promise<DesktopProjectSelection | null>;
+    recentProjects: () => Promise<RecentProject[]>;
+    rememberProject: (path: string, name: string) => Promise<void>;
     openSpeakerPackage: () => Promise<DesktopPackageSelection | null>;
     openRigidMesh: () => Promise<DesktopPackageSelection | null>;
     saveProject: (contents: string, suggestedName: string) => Promise<string | null>;

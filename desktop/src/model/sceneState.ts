@@ -41,7 +41,7 @@ export function emptyFieldFrame(observation: ObservationPlane): FieldFrame {
   };
 }
 
-export type SolvedFieldEntry = { key: string; field: FieldFrame };
+export type SolvedFieldEntry = { key: string; field: FieldFrame; fields?: Record<string, FieldFrame> };
 export type SolvedFieldCache = Record<"boundary" | "coupled", SolvedFieldEntry | null>;
 
 export const emptySolvedFieldCache = (): SolvedFieldCache => ({ boundary: null, coupled: null });

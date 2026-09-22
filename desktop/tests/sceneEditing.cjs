@@ -11,19 +11,21 @@ app.whenReady().then(async()=>{
   try {
     const mesh=Array.from(readFileSync(join(__dirname,'../library/RigidStage_LOD.msh')));
     const bundle=await build({absWorkingDir:join(__dirname,'..'),bundle:true,write:false,format:'iife',jsx:'automatic',
-      plugins:[{name:'disk-backed-demo',setup(b){b.onLoad({filter:/demoPackage\.ts$/},args=>({
+      plugins:[{name:'disk-backed-demo',setup(b){b.onLoad({filter:/SceneView\.tsx$/},args=>({contents:readFileSync(args.path,'utf8').replace('export function SceneView(props: SceneViewProps) {','export function SceneView(props: SceneViewProps) { (window as any).planeFrames = props.planes?.map(p => ({ id: p.observation.id, spl: p.field.splDb[0] }));'),loader:'tsx'}));b.onLoad({filter:/demoPackage\.ts$/},args=>({
         contents:readFileSync(args.path,'utf8').replace('sourcePath: null','sourcePath: "fixture.blabsp"'),loader:'ts'}));}}],
       outdir:'unused',define:{'process.env.NODE_ENV':'"production"'},stdin:{resolveDir:join(__dirname,'..'),loader:'tsx',contents:`
       import React from 'react'; import {createRoot} from 'react-dom/client';
       import {App} from './src/App'; import './src/styles.css';
       window.clipText=''; window.failWrite=false;
-      window.boundaryLabDesktop={loadBundledExample:async()=>null,onSolveStatus:()=>()=>{},onMicrophoneSweepProgress:()=>()=>{},
-        solveLevel2:async()=>new Promise(resolve=>{window.finishSolve=resolve;}),
+      window.testDesktop={recentProjects:async()=>window.saved?[{path:'E:/Studies/test.blabdeploy.json',name:window.saved.name,modifiedAt:'2026-09-20T12:00:00Z',openedAt:'2026-09-22T12:00:00Z',available:true}]:[],rememberProject:async()=>{},
+        openProject:async(path)=>{window.openedPath=path;return {name:'test.blabdeploy.json',path,contents:JSON.stringify(window.saved),packages:[],rigidMeshes:[]};},loadBundledExample:async()=>null,onSolveStatus:()=>()=>{},onMicrophoneSweepProgress:()=>()=>{},
+        solveLevel2:async(request)=>new Promise(resolve=>{(window.solveRequests ||= []).push(request);window.finishSolve=resolve;}),
         calculateMicrophoneSweep:async()=>new Promise(resolve=>{window.finishSweep=resolve;}),
         cancelMicrophoneSweep:async()=>{window.cancelledSweeps=(window.cancelledSweeps||0)+1;return true;},
         readSceneClipboard:async()=>window.clipText,writeSceneClipboard:async(text)=>{if(window.failWrite)throw Error('Clipboard unavailable');window.clipText=text;},
         saveProject:async(text)=>{window.saved=JSON.parse(text);return 'study.blabdeploy.json';},
         openRigidMesh:async()=>({name:'Stage.msh',path:'Stage.msh',bytes:Uint8Array.from(${JSON.stringify(mesh)}).buffer})};
+      window.boundaryLabDesktop=window.testDesktop;window.confirm=()=>true;
       createRoot(document.getElementById('root')).render(<App/>);
       `}});
     const css=bundle.outputFiles.find(f=>f.path.endsWith('.css')).text;
@@ -43,7 +45,33 @@ app.whenReady().then(async()=>{
     };
     const count=prefix=>run(`document.querySelectorAll('.tree-button[data-object-id^="${prefix}-"]').length`);
     const save=async()=>{await click('button[title="Save project"]');return run('window.saved');};
+    await wait('document.querySelector(".projects-screen")');
+    assert.equal(await run('document.querySelectorAll("canvas").length'),0,'Launcher does not mount a viewport');
+    await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='New').click()`);
+    await wait('document.querySelector(".app-shell")');
+    const blank=await save();
+    assert.equal(blank.packages.length,0);assert.equal(blank.sources.length,0);assert.equal(blank.audience_planes.length,0);
+    await click('button[aria-label="Add audience plane"]');
+    await click('button[aria-label="Add audience plane"]');
+    let planes=(await save()).audience_planes;assert.equal(planes.length,2);assert.notEqual(planes[0].id,planes[1].id);
+    await key('z');assert.equal((await save()).audience_planes.length,1);
+    await key('y');assert.equal((await save()).audience_planes.length,2);
+    await click('button[aria-label="Remove selected objects"]');assert.equal((await save()).audience_planes.length,1);
+    await key('z');assert.equal((await save()).audience_planes.length,2);
+    await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Projects').click()`);
+    await wait('document.querySelector(".recent-project-link")');
+    assert.ok(await run(`document.querySelector('.recent-project-link').textContent.includes('E:/Studies/test.blabdeploy.json')`));
+    writeFileSync(join(dir,'projects-screen.png'),(await win.capturePage()).toPNG());
+    await click('.recent-project-link');
+    await wait('document.querySelector(".app-shell")');
+    assert.equal(await run('window.openedPath'),'E:/Studies/test.blabdeploy.json');
+    assert.equal((await save()).audience_planes.length,2,'Recent project restores every plane without speaker packages');
+    await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Projects').click()`);
+    await wait('document.querySelector(".projects-screen")');
+    // Use the generated browser example here; disk package parsing has separate coverage.
+    await run(`window.boundaryLabDesktop=undefined;Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Open example').click()`);
     await wait('document.querySelectorAll(".tree-button").length>=3');
+    await run("window.boundaryLabDesktop=window.testDesktop;void 0;");
     const start=await save();assert.equal(start.sources.length,2);
     await key('d');assert.equal(await count('subwoofer'),2,'Ctrl+D is removed');
     assert.equal(await run('document.querySelectorAll(\'button[aria-label="Duplicate selected boundary objects"]\').length'),0);
@@ -110,8 +138,17 @@ app.whenReady().then(async()=>{
     // Late backend completions cannot revive results after undo/redo restores an old key.
     await run(`Array.from(document.querySelectorAll('.fidelity-switcher button')).find(b=>b.textContent.includes('Boundary')).click()`);
     await delay(100);await click('button[aria-label="Add microphone"]');
+    await click('button[aria-label="Add audience plane"]');
     await run(`Array.from(document.querySelectorAll('.topbar button')).find(b=>b.textContent.includes('Solve field')).click()`);
-    await wait('typeof window.finishSolve === "function"');
+    await wait('window.solveRequests?.length === 1');
+    await run(`window.finishSolve({columns:2,rows:2,spl_db:[40,40,40,40],sample_indices:[0,1,2,3],field_pressure:{real:[1,1,1,1],imag:[0,0,0,0]},timings:{}})`);
+    await wait('window.solveRequests?.length === 2');
+    assert.equal(await run('window.solveRequests[1].reuseBoundary'),true,'Reuse the boundary solution for the next plane');
+    await run(`window.finishSolve({columns:2,rows:2,spl_db:[90,90,90,90],sample_indices:[0,1,2,3],field_pressure:{real:[2,2,2,2],imag:[0,0,0,0]},timings:{}})`);
+    await wait('window.planeFrames?.[1]?.spl === 90');
+    assert.deepEqual(await run('window.planeFrames.map(p=>p.spl)'),[40,90],'Distinct solver fields are routed to the matching planes');
+    await click('button[aria-label="Add audience plane"]');
+    await wait('window.solveRequests?.length === 3');
     const revision=await run(`document.querySelector('.solve-status').dataset.solveRevision`);
     await key('z');await key('y');
     await run(`window.finishSolve({columns:2,rows:2,spl_db:[80,80,80,80],sample_indices:[0,1,2,3],field_pressure:{real:[1,1,1,1],imag:[0,0,0,0]},timings:{}})`);
@@ -125,7 +162,7 @@ app.whenReady().then(async()=>{
     assert.ok(await run('window.cancelledSweeps>0'));
     assert.equal(await run(`document.querySelectorAll('.solve-error').length`),0);
     assert.deepEqual(errors,[]);
-    console.log('Editing UI passed: single/mixed copy-paste, cut failure, undo/redo, input focus, grouped typing, removed duplication.');
+    console.log('Projects and editing UI passed: blank startup, recent reopen, multiple planes and distinct fields, clipboard/history, late result rejection.');
     app.exit(0);
   }catch(error){console.error(error);console.error(errors);app.exit(1);}
 });
