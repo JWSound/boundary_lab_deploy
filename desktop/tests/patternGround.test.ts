@@ -69,3 +69,13 @@ check([{ ...source, pitchDeg: 32, yawDeg: 57, rollDeg: -23 }], { ...plane, heigh
 const below = computeFieldFrame(pkg, [buildSourceInstance(source)], [source], { ...plane, heightM: -1 }, 0, buildPatternLookup(pkg, 0));
 assert.equal(below.validMask[0], 0);
 console.log("Rigid-ground pattern: complex image sum, +6 dB, rotated directivity, drive controls and microphone/map parity passed.");
+
+// A shared drive change scales both complex field components and microphone SPL.
+const { applyChannelProcessing, createDefaultChannel } = await import("../src/model/channels");
+const configs = [source, { ...source, id: "second", positionX: 3, delayMs: 1.2, polarity: -1 as const }];
+const channels = [{ ...createDefaultChannel(), id: "main", levelDb: -24 }];
+const reference = check(applyChannelProcessing(configs, channels, 0), plane);
+const amplified = check(applyChannelProcessing(configs, channels, 32), plane);
+close(amplified.splDb[0] - reference.splDb[0], 32, 2e-5);
+close(amplified.pressureReal[0], reference.pressureReal[0] * 10 ** (32 / 20));
+close(amplified.pressureImag[0], reference.pressureImag[0] * 10 ** (32 / 20));

@@ -54,9 +54,19 @@ const migrated = parseDeployProject(JSON.stringify({
   selected_frequency_hz: 80,
   requested_fidelity: "pattern",
 }));
-assert.equal(migrated.schema_version, 8);
+assert.equal(migrated.schema_version, 9);
 assert.equal(migrated.channels[0].id, DEFAULT_CHANNEL_ID);
 assert.equal(migrated.sources[0].channelId, DEFAULT_CHANNEL_ID);
 assert.deepEqual(migrated.sources[0].equalizer, { filters: [] });
 
 console.log("channel processing regression tests passed");
+
+assert.equal(createDefaultChannel().levelDb, -24);
+assert.equal(migrated.channels[0].levelDb, 0, "Legacy projects without channels retain unity channel gain");
+assert.equal(migrated.system_gain_db, 0);
+const boosted = applyChannelProcessing([source, { ...source, id: "second", levelDb: -9 }], [channel], 32);
+assert.deepEqual(boosted.map(s => s.levelDb), [35, 29]);
+assert.equal(boosted[0].delayMs, effective.delayMs);
+assert.equal(boosted[0].polarity, effective.polarity);
+assert.equal(applyChannelProcessing([source], [{ ...channel, muted: true }], 32)[0].muted, true);
+assert.equal(applyChannelProcessing([{ ...source, levelDb: 0 }], [createDefaultChannel()], 32)[0].levelDb, 8);

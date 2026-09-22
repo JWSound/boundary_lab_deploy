@@ -48,3 +48,8 @@ const bounded=new EditorHistory(0,(a,b)=>a===b,3);
 for(let n=1;n<=5;n++) bounded.run("step",()=>bounded.update(n));
 for(let n=0;n<10;n++) bounded.undo(); assert.equal(bounded.present,2,"History stays bounded");
 console.log("Scene clipboard and transactional history passed");
+
+const gainHistory = new EditorHistory(exampleScene(), equalScene);
+gainHistory.run("Change system gain", () => gainHistory.set("systemGainDb", 32));
+gainHistory.undo(); assert.equal(gainHistory.present.systemGainDb, 0);
+gainHistory.redo(); assert.equal(gainHistory.present.systemGainDb, 32);

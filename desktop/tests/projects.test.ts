@@ -17,7 +17,7 @@ const example = exampleScene();
 const old = createDeployProject(example.projectName, example.packages, [], example.channels, example.sourceConfigs, [], [], example.audiencePlanes, 80, "pattern");
 for (const version of [5, 6, 7]) {
   const migrated = parseDeployProject(JSON.stringify({ ...old, schema_version: version, audience_planes: undefined, observation_plane: defaultObservation }));
-  assert.equal(migrated.schema_version, 8); assert.equal(migrated.audience_planes.length, 1);
+  assert.equal(migrated.schema_version, 9); assert.equal(migrated.audience_planes.length, 1);
   assert.deepEqual(migrated.audience_planes[0], { ...defaultObservation, id: "audience-plane", name: "Audience plane" });
 }
 assert.throws(() => parseDeployProject(JSON.stringify({ ...old, packages: [] })), /imported package/);
@@ -32,3 +32,16 @@ assert.deepEqual(parseDeployProject(serializeDeployProject(scaled)).heatmap_scal
 const perPlane = { ...project, heatmap_scale: undefined, audience_planes: [{ ...planes[0], ...scale }, planes[1]] };
 assert.ok(parseDeployProject(JSON.stringify(perPlane)).audience_planes.every(p => p.pressureScalePa === 32), "Legacy per-plane scales use the first plane");
 assert.throws(() => parseDeployProject(JSON.stringify({ ...scaled, heatmap_scale: { ...scale, heatmapMaximumDb: 20 } })), /maximum/i);
+
+assert.equal(blank.systemGainDb, 32);
+assert.equal(blank.channels[0].levelDb, -24);
+assert.equal(example.systemGainDb, 0);
+assert.equal(example.channels[0].levelDb, 0);
+const gainProject = createDeployProject(blank.projectName, [], [], blank.channels, [], [], [], [], 80, "pattern", blank.heatmapScale, 26.5);
+assert.equal(parseDeployProject(serializeDeployProject(gainProject)).system_gain_db, 26.5);
+const v8 = parseDeployProject(JSON.stringify({ ...gainProject, schema_version: 8, system_gain_db: undefined, channels: [{ ...blank.channels[0], levelDb: 6 }] }));
+assert.equal(v8.system_gain_db, 0);
+assert.equal(v8.channels[0].levelDb, 6);
+for (const bad of [undefined, null, "32", 61, -61]) {
+  assert.throws(() => parseDeployProject(JSON.stringify({ ...gainProject, system_gain_db: bad })), /system_gain_db/);
+}

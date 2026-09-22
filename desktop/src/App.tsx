@@ -39,6 +39,7 @@ import {
   PlaneResolutionInspector,
   SceneTree,
   SectionHeader,
+  Slider,
   SourceInspector,
   RigidMeshCard,
   RigidMeshInspector,
@@ -62,7 +63,7 @@ import {
 import type { Fidelity, FieldFrame, LoadedSpeakerPackage, MicrophoneConfiguration, ObservationPlane, RigidMeshAsset, RigidMeshConfiguration, SourceConfiguration } from "./model/types";
 import { heatmapLegendGradient } from "./model/heatmap";
 import { cabinetClearanceViolations, constrainCabinetPoses, findClearSourcePlacement, type BoundaryMeshAsset } from "./model/cabinetPlacement";
-import { applyChannelProcessing, CHANNEL_COLORS, createDefaultChannel } from "./model/channels";
+import { applyChannelProcessing, CHANNEL_COLORS, createDefaultChannel, DEFAULT_CHANNEL_LEVEL_DB } from "./model/channels";
 import type { DeployChannel } from "./model/types";
 
 export function App() {
@@ -77,7 +78,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     setRigidMeshes, setActiveRigidMeshId, setRigidObjects, setMicrophones, setAudiencePlanes, setActivePlaneId,
     setFrequencyIndex, setFidelity, setSelectedInstances, setProjectName } = useSceneEditor();
   const { packages, activePackageId, sourceConfigs, channels, activeChannelId, rigidMeshes,
-    activeRigidMeshId, rigidObjects, microphones, audiencePlanes, heatmapScale, activePlaneId, frequencyIndex, fidelity,
+    activeRigidMeshId, rigidObjects, microphones, audiencePlanes, heatmapScale, systemGainDb, activePlaneId, frequencyIndex, fidelity,
     selectedInstances, projectName } = present;
   const pkg = packages.find((candidate) => candidate.id === activePackageId) ?? packages[0];
   const frequenciesHz = pkg?.frequenciesHz ?? EMPTY_FREQUENCIES;
@@ -281,7 +282,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     [packageById, pkg],
   );
   const sources = useMemo(() => sourceConfigs.map(buildSourceInstance), [sourceConfigs]);
-  const drivenSourceConfigs = useMemo(() => applyChannelProcessing(sourceConfigs, channels), [channels, sourceConfigs]);
+  const drivenSourceConfigs = useMemo(() => applyChannelProcessing(sourceConfigs, channels, systemGainDb), [channels, sourceConfigs, systemGainDb]);
   const sceneClearanceValid = useMemo(
     () => cabinetClearanceViolations(boundaryAssetById, [...sources, ...rigidInstances]).length === 0,
     [boundaryAssetById, rigidInstances, sources],
@@ -444,6 +445,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     frequenciesHz[frequencyIndex],
     fidelity,
     heatmapScale,
+    systemGainDb,
   ));
   const projectEdited = savedProjectSnapshot === null || savedProjectSnapshot !== currentProjectContents;
   const captureCurrentAnalysis = () => {
@@ -479,7 +481,8 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     sweepGeneration.current += 1; microphoneSweepKeyRef.current = null;
     setPackages([next]);
     setActivePackageId(next.id);
-    const defaultChannel = createDefaultChannel();
+    const defaultChannel = { ...createDefaultChannel(), levelDb: 0 };
+    editor.set("systemGainDb", 0);
     setChannels([defaultChannel]);
     setActiveChannelId(defaultChannel.id);
     setSourceConfigs(defaultSources(next));
@@ -592,6 +595,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
       nextPackage?.frequenciesHz[nextFrequencyIndex] ?? 80,
       nextFidelity,
       project.heatmap_scale,
+      project.system_gain_db,
     ));
     setPackages(nextPackages);
     setRigidMeshes(nextRigidMeshes);
@@ -606,6 +610,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     setMicrophones(project.microphones);
     microphonesRef.current = project.microphones;
     editor.set("heatmapScale", project.heatmap_scale);
+    editor.set("systemGainDb", project.system_gain_db);
     setAudiencePlanes(project.audience_planes);
     setActivePlaneId(project.audience_planes[0]?.id ?? null);
     observationRef.current = project.audience_planes[0] ?? defaultObservation;
@@ -1543,7 +1548,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
       yawDeg: 0,
       rollDeg: 0,
       channelId: channels.some((channel) => channel.id === activeChannelId) ? activeChannelId : channels[0].id,
-      levelDb: -3,
+      levelDb: 0,
       delayMs: 0,
       polarity: 1,
       equalizer: { filters: [] },
@@ -1634,7 +1639,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
       id: `channel-${suffix}`,
       name: `Channel ${suffix}`,
       color: CHANNEL_COLORS[channels.length % CHANNEL_COLORS.length],
-      levelDb: 0,
+      levelDb: DEFAULT_CHANNEL_LEVEL_DB,
       delayMs: 0,
       polarity: 1,
       muted: false,
@@ -1964,6 +1969,12 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
           </>
         ) : leftTab === "scene" ? (
           <>
+            <SectionHeader icon={SlidersHorizontal} title="System level" />
+            <div className="inspector-section">
+              <Slider label="System gain" value={systemGainDb} minimum={-60} maximum={60} step={0.5} unit=" dB" editable onChange={value => editor.set("systemGainDb", value, true, "Change system gain")} />
+              <p className="package-subtitle">Relative to package reference, before channel and object trims.</p>
+              <p className="package-subtitle">At 2.83 V reference: {(2.83 * 10 ** (systemGainDb / 20)).toFixed(2)} V before trims.</p>
+            </div>
             <SectionHeader
               icon={Speaker}
               title="Scene hierarchy"
