@@ -1,10 +1,10 @@
 import { planeScale, type PlaneScale } from "../model/planeScale";
 import { defaultObservation } from "../model/sceneState";
-import { createDefaultChannel, DEFAULT_CHANNEL_ID } from "../model/channels";
+import { createDefaultChannel, DEFAULT_CHANNEL_ID, DEFAULT_SYSTEM_GAIN_DB } from "../model/channels";
 import type { DeployChannel, EqualizerConfiguration, Fidelity, LoadedSpeakerPackage, MicrophoneConfiguration, ObservationPlane, AudiencePlane, RigidMeshAsset, RigidMeshConfiguration, SourceConfiguration } from "../model/types";
 
 export const DEPLOY_PROJECT_SCHEMA = "boundary-lab-deploy-project";
-export const DEPLOY_PROJECT_SCHEMA_VERSION = 8;
+export const DEPLOY_PROJECT_SCHEMA_VERSION = 9;
 
 export interface DeployPackageReference {
   id: string;
@@ -31,6 +31,7 @@ export interface DeployProject {
   microphones: MicrophoneConfiguration[];
   audience_planes: AudiencePlane[];
   heatmap_scale: PlaneScale;
+  system_gain_db: number;
   selected_frequency_hz: number;
   requested_fidelity: Fidelity;
 }
@@ -212,7 +213,7 @@ export function parseDeployProject(contents: string): DeployProject {
   const project = record(raw, "Project");
   if (project.schema !== DEPLOY_PROJECT_SCHEMA) throw new Error("This is not a Boundary Lab Deploy project.");
   const version = finite(project.schema_version, "schema_version");
-  if (version !== 5 && version !== 6 && version !== 7 && version !== DEPLOY_PROJECT_SCHEMA_VERSION) {
+  if (version !== 5 && version !== 6 && version !== 7 && version !== 8 && version !== DEPLOY_PROJECT_SCHEMA_VERSION) {
     throw new Error(`Unsupported Boundary Lab Deploy project schema version ${version}.`);
   }
   if (typeof project.name !== "string" || project.name.trim().length === 0) {
@@ -259,7 +260,7 @@ export function parseDeployProject(contents: string): DeployProject {
   if (!Array.isArray(sourcesValue)) throw new Error("sources must be an array.");
   const legacyChannels = version < 7;
   if (!legacyChannels && !Array.isArray(project.channels)) throw new Error("channels must be an array.");
-  const channels = legacyChannels ? [createDefaultChannel()] : (project.channels as unknown[]).map(channelConfiguration);
+  const channels = legacyChannels ? [{ ...createDefaultChannel(), levelDb: 0 }] : (project.channels as unknown[]).map(channelConfiguration);
   if (channels.length === 0) throw new Error("A project must contain at least one channel.");
   if (new Set(channels.map((channel) => channel.id)).size !== channels.length) throw new Error("Every project channel must have a unique id.");
   const sources = sourcesValue.map((value, index) => sourceConfiguration(value, index, legacyChannels));
@@ -307,6 +308,8 @@ export function parseDeployProject(contents: string): DeployProject {
   const heatmapScale = project.heatmap_scale === undefined ? planeScale(audiencePlanes[0])
     : planeScale(observationPlane({ ...defaultObservation, ...record(project.heatmap_scale, "heatmap_scale") }));
   const frequencyHz = positive(project.selected_frequency_hz, "selected_frequency_hz");
+  const systemGainDb = version < 9 ? 0 : finite(project.system_gain_db, "system_gain_db");
+  if (systemGainDb < -60 || systemGainDb > 60) throw new Error("system_gain_db must be between -60 and 60 dB.");
   const requestedFidelity = project.requested_fidelity;
   if (requestedFidelity !== "pattern" && requestedFidelity !== "boundary" && requestedFidelity !== "coupled") {
     throw new Error("requested_fidelity must be pattern, boundary, or coupled.");
@@ -323,6 +326,7 @@ export function parseDeployProject(contents: string): DeployProject {
     microphones,
     audience_planes: audiencePlanes.map(p => ({ ...p, ...heatmapScale })),
     heatmap_scale: heatmapScale,
+    system_gain_db: systemGainDb,
     selected_frequency_hz: frequencyHz,
     requested_fidelity: requestedFidelity,
   };
@@ -340,6 +344,7 @@ export function createDeployProject(
   selectedFrequencyHz: number,
   requestedFidelity: Fidelity,
   heatmapScale: PlaneScale = planeScale(Array.isArray(observation) ? observation[0] : observation),
+  systemGainDb = DEFAULT_SYSTEM_GAIN_DB,
 ): DeployProject {
   return {
     schema: DEPLOY_PROJECT_SCHEMA,
@@ -358,6 +363,7 @@ export function createDeployProject(
     microphones,
     audience_planes: (Array.isArray(observation) ? observation : [{ ...observation, id: "audience-plane", name: "Audience plane" }]).map(p => ({ ...p, ...heatmapScale })),
     heatmap_scale: heatmapScale,
+    system_gain_db: systemGainDb,
     selected_frequency_hz: selectedFrequencyHz,
     requested_fidelity: requestedFidelity,
   };

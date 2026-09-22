@@ -49,6 +49,20 @@ app.whenReady().then(async()=>{
     assert.equal(await run('document.querySelectorAll("canvas").length'),0,'Launcher does not mount a viewport');
     await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='New').click()`);
     await wait('document.querySelector(".app-shell")');
+    assert.equal((await save()).system_gain_db,32);
+    assert.equal((await save()).channels[0].levelDb,-24);
+    await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Scene').click()`);
+    await delay(80);
+    assert.equal(await run(`document.querySelector('input[aria-label="System gain"]').value`),'32');
+    await run(`(()=>{const input=document.querySelector('input[aria-label="System gain"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'26');input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+    await delay(80);
+    assert.equal((await save()).system_gain_db,26);
+    await key('z');assert.equal((await save()).system_gain_db,32);
+    await key('y');assert.equal((await save()).system_gain_db,26);
+    await key('z');
+    await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Library').click()`);
+    await delay(80);
+
     const blank=await save();
     assert.equal(blank.packages.length,0);assert.equal(blank.sources.length,0);assert.equal(blank.audience_planes.length,0);
     await click('button[aria-label="Add audience plane"]');

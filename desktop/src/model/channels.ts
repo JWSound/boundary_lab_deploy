@@ -1,5 +1,8 @@
 import type { DeployChannel, EqualizerConfiguration, SourceConfiguration } from "./types";
 
+export const DEFAULT_SYSTEM_GAIN_DB = 32;
+export const DEFAULT_CHANNEL_LEVEL_DB = -24;
+
 export const DEFAULT_CHANNEL_ID = "channel-main";
 export const EMPTY_EQUALIZER: EqualizerConfiguration = { filters: [] };
 export const CHANNEL_COLORS = ["#9eb9ef", "#efad72", "#8fd19e", "#d39be8", "#e4d071", "#78c9d4"];
@@ -9,7 +12,7 @@ export function createDefaultChannel(): DeployChannel {
     id: DEFAULT_CHANNEL_ID,
     name: "Main",
     color: CHANNEL_COLORS[0],
-    levelDb: 0,
+    levelDb: DEFAULT_CHANNEL_LEVEL_DB,
     delayMs: 0,
     polarity: 1,
     muted: false,
@@ -20,6 +23,7 @@ export function createDefaultChannel(): DeployChannel {
 export function applyChannelProcessing(
   sources: readonly SourceConfiguration[],
   channels: readonly DeployChannel[],
+  systemGainDb = 0,
 ): SourceConfiguration[] {
   const channelById = new Map(channels.map((channel) => [channel.id, channel]));
   const fallback = channels[0] ?? createDefaultChannel();
@@ -27,7 +31,7 @@ export function applyChannelProcessing(
     const channel = channelById.get(source.channelId) ?? fallback;
     return {
       ...source,
-      levelDb: source.levelDb + channel.levelDb,
+      levelDb: source.levelDb + channel.levelDb + systemGainDb,
       delayMs: source.delayMs + channel.delayMs,
       polarity: (source.polarity * channel.polarity) as 1 | -1,
       muted: channel.muted,
