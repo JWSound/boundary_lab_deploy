@@ -54,7 +54,7 @@ const migrated = parseDeployProject(JSON.stringify({
   selected_frequency_hz: 80,
   requested_fidelity: "pattern",
 }));
-assert.equal(migrated.schema_version, 7);
+assert.equal(migrated.schema_version, 8);
 assert.equal(migrated.channels[0].id, DEFAULT_CHANNEL_ID);
 assert.equal(migrated.sources[0].channelId, DEFAULT_CHANNEL_ID);
 assert.deepEqual(migrated.sources[0].equalizer, { filters: [] });

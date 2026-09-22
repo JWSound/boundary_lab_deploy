@@ -1,8 +1,10 @@
+import { planeScale, type PlaneScale } from "../model/planeScale";
+import { defaultObservation } from "../model/sceneState";
 import { createDefaultChannel, DEFAULT_CHANNEL_ID } from "../model/channels";
-import type { DeployChannel, EqualizerConfiguration, Fidelity, LoadedSpeakerPackage, MicrophoneConfiguration, ObservationPlane, RigidMeshAsset, RigidMeshConfiguration, SourceConfiguration } from "../model/types";
+import type { DeployChannel, EqualizerConfiguration, Fidelity, LoadedSpeakerPackage, MicrophoneConfiguration, ObservationPlane, AudiencePlane, RigidMeshAsset, RigidMeshConfiguration, SourceConfiguration } from "../model/types";
 
 export const DEPLOY_PROJECT_SCHEMA = "boundary-lab-deploy-project";
-export const DEPLOY_PROJECT_SCHEMA_VERSION = 7;
+export const DEPLOY_PROJECT_SCHEMA_VERSION = 8;
 
 export interface DeployPackageReference {
   id: string;
@@ -27,7 +29,8 @@ export interface DeployProject {
   sources: SourceConfiguration[];
   rigid_objects: RigidMeshConfiguration[];
   microphones: MicrophoneConfiguration[];
-  observation_plane: ObservationPlane;
+  audience_planes: AudiencePlane[];
+  heatmap_scale: PlaneScale;
   selected_frequency_hz: number;
   requested_fidelity: Fidelity;
 }
@@ -209,14 +212,14 @@ export function parseDeployProject(contents: string): DeployProject {
   const project = record(raw, "Project");
   if (project.schema !== DEPLOY_PROJECT_SCHEMA) throw new Error("This is not a Boundary Lab Deploy project.");
   const version = finite(project.schema_version, "schema_version");
-  if (version !== 5 && version !== 6 && version !== DEPLOY_PROJECT_SCHEMA_VERSION) {
+  if (version !== 5 && version !== 6 && version !== 7 && version !== DEPLOY_PROJECT_SCHEMA_VERSION) {
     throw new Error(`Unsupported Boundary Lab Deploy project schema version ${version}.`);
   }
   if (typeof project.name !== "string" || project.name.trim().length === 0) {
     throw new Error("name must be a non-empty string.");
   }
-  if (!Array.isArray(project.packages) || project.packages.length === 0) {
-    throw new Error("A project must contain at least one speaker package.");
+  if (!Array.isArray(project.packages)) {
+    throw new Error("packages must be an array.");
   }
   const packages = project.packages.map((value, index): DeployPackageReference => {
     const packageReference = record(value, `packages[${index}]`);
@@ -288,6 +291,21 @@ export function parseDeployProject(contents: string): DeployProject {
   if (microphones.some((microphone) => objectIds.has(microphone.id) || microphone.id === "audience-plane")) {
     throw new Error("Project scene-object ids must be unique.");
   }
+  for (const microphone of microphones) objectIds.add(microphone.id);
+  const planeValues = version < 8
+    ? [{ ...record(project.observation_plane, "observation_plane"), id: "audience-plane", name: "Audience plane" }]
+    : project.audience_planes;
+  if (!Array.isArray(planeValues)) throw new Error("audience_planes must be an array.");
+  const audiencePlanes = planeValues.map((value, index): AudiencePlane => {
+    const plane = record(value, `audience_planes[${index}]`);
+    if (typeof plane.id !== "string" || !plane.id.trim() || objectIds.has(plane.id)) throw new Error("Audience plane IDs must be unique scene-object IDs.");
+    if (typeof plane.name !== "string" || !plane.name.trim()) throw new Error("Audience plane name must not be empty.");
+    objectIds.add(plane.id);
+    return { ...observationPlane(plane, version === 5), id: plane.id, name: plane.name.trim() };
+  });
+  // Older files stored scales per plane; the first plane becomes the shared scale.
+  const heatmapScale = project.heatmap_scale === undefined ? planeScale(audiencePlanes[0])
+    : planeScale(observationPlane({ ...defaultObservation, ...record(project.heatmap_scale, "heatmap_scale") }));
   const frequencyHz = positive(project.selected_frequency_hz, "selected_frequency_hz");
   const requestedFidelity = project.requested_fidelity;
   if (requestedFidelity !== "pattern" && requestedFidelity !== "boundary" && requestedFidelity !== "coupled") {
@@ -303,7 +321,8 @@ export function parseDeployProject(contents: string): DeployProject {
     sources,
     rigid_objects: rigidObjects,
     microphones,
-    observation_plane: observationPlane(project.observation_plane, version === 5),
+    audience_planes: audiencePlanes.map(p => ({ ...p, ...heatmapScale })),
+    heatmap_scale: heatmapScale,
     selected_frequency_hz: frequencyHz,
     requested_fidelity: requestedFidelity,
   };
@@ -317,9 +336,10 @@ export function createDeployProject(
   sources: SourceConfiguration[],
   rigidObjects: RigidMeshConfiguration[],
   microphones: MicrophoneConfiguration[],
-  observation: ObservationPlane,
+  observation: ObservationPlane | AudiencePlane[],
   selectedFrequencyHz: number,
   requestedFidelity: Fidelity,
+  heatmapScale: PlaneScale = planeScale(Array.isArray(observation) ? observation[0] : observation),
 ): DeployProject {
   return {
     schema: DEPLOY_PROJECT_SCHEMA,
@@ -336,7 +356,8 @@ export function createDeployProject(
     sources,
     rigid_objects: rigidObjects,
     microphones,
-    observation_plane: observation,
+    audience_planes: (Array.isArray(observation) ? observation : [{ ...observation, id: "audience-plane", name: "Audience plane" }]).map(p => ({ ...p, ...heatmapScale })),
+    heatmap_scale: heatmapScale,
     selected_frequency_hz: selectedFrequencyHz,
     requested_fidelity: requestedFidelity,
   };

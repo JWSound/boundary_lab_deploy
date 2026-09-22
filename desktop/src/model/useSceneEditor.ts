@@ -12,7 +12,7 @@ export function useSceneEditor() {
       setPackages: field("packages", "Import speaker package"), setRigidMeshes: field("rigidMeshes", "Import rigid mesh"),
       setSourceConfigs: field("sourceConfigs", "Edit speakers"), setRigidObjects: field("rigidObjects", "Edit rigid objects"),
       setMicrophones: field("microphones", "Edit microphones"), setChannels: field("channels", "Edit channels"),
-      setObservation: field("observation", "Edit audience plane"), setProjectName: field("projectName", "Rename project"),
+      setAudiencePlanes: field("audiencePlanes", "Edit audience planes"), setActivePlaneId: field("activePlaneId", "", false), setProjectName: field("projectName", "Rename project"),
       setFrequencyIndex: field("frequencyIndex", "Change frequency"), setFidelity: field("fidelity", "Change fidelity"),
       setSelectedInstances: field("selectedInstances", "", false), setActivePackageId: field("activePackageId", "", false),
       setActiveRigidMeshId: field("activeRigidMeshId", "", false), setActiveChannelId: field("activeChannelId", "", false),

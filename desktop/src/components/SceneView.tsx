@@ -79,6 +79,7 @@ interface SceneViewProps {
   microphones: MicrophoneConfiguration[];
   observation: ObservationPlane;
   field: FieldFrame;
+  planes?: Array<{ observation: import("../model/types").AudiencePlane; field: FieldFrame }>;
   phaseAnimationEnabled: boolean;
   selectedInstances: readonly string[];
   activeInstance: string | null;
@@ -1615,19 +1616,20 @@ function AcousticScene(props: SceneViewProps) {
           onManipulationEnd={props.onManipulationEnd}
         />
       ))}
-      <FieldPlane
-        observation={props.observation}
-        field={props.field}
+      {(props.planes ?? [{ observation: { ...props.observation, id: "audience-plane", name: "Audience plane" }, field: props.field }]).map(({ observation, field }) => <FieldPlane
+        key={observation.id}
+        observation={observation}
+        field={field}
         phaseAnimationEnabled={props.phaseAnimationEnabled}
-        selected={selectedInstances.has("audience-plane")}
-        active={props.activeInstance === "audience-plane"}
+        selected={selectedInstances.has(observation.id)}
+        active={props.activeInstance === observation.id}
         transformMode={props.transformMode}
         angleSnapDisabled={props.angleSnapDisabled}
         onTransform={props.onTransformObservation}
         onResize={props.onResizeObservation}
         onManipulationEnd={props.onManipulationEnd}
         onTextureReady={props.onFieldTextureReady}
-      />
+      />)}
       <gridHelper args={[50, 50, "#303831", "#242a25"]} position={[0, 0, 12]} />
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.012, 12]} receiveShadow>
         <planeGeometry args={[50, 50]} />
@@ -1649,7 +1651,7 @@ function AcousticScene(props: SceneViewProps) {
 export function SceneView(props: SceneViewProps) {
   return (
     <Canvas
-      frameloop={props.phaseAnimationEnabled && props.observation.displayMode !== "spl" ? "always" : "demand"}
+      frameloop={props.phaseAnimationEnabled && (props.planes ? props.planes.some(p => p.observation.displayMode !== "spl") : props.observation.displayMode !== "spl") ? "always" : "demand"}
       shadows
       dpr={[1, 1.7]}
       camera={{ position: [9.5, 7.5, 13.5], fov: 44, near: 0.05, far: 300 }}

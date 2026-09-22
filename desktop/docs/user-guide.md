@@ -9,14 +9,15 @@ You do not need to prepare a numerical mesh to use an existing speaker package.
 
 ## First study
 
-1. Start Deploy using the [installation instructions](../README.md). The bundled
-   S218BP example provides a starting scene; its coarse model is a demonstration,
-   not a substitute for a suitably resolved production package.
+1. Start Deploy using the [installation instructions](../README.md). The Projects
+   screen lists recent projects with full paths and file modification dates. Choose
+   **New** for a blank scene, **Open project**, or **Open example** for the S218BP study.
+   The example is a coarse demonstration model, not a production package.
 2. Import the required `.blabsp` speaker package into the library. Importing a
    package does not replace the scene. Choose the active package and add cabinets.
 3. Set cabinet positions and orientations, then assign output channels and drive
    settings. Start with Pattern for immediate placement feedback.
-4. Position the audience plane and add microphones at representative listening
+4. Add audience planes with **Add audience plane**, then position them and add microphones at representative listening
    positions. Set the frequency and display range for the coverage map.
 5. Where supported, select Boundary or Coupled and solve the field. Run a separate
    frequency sweep in the analysis drawer for microphone or speaker responses.
@@ -26,6 +27,30 @@ You do not need to prepare a numerical mesh to use an existing speaker package.
 Create new speaker packages in the main Boundary Lab application; see its
 [User Guide](https://github.com/JWSound/boundary-lab/blob/main/docs/User%20Guide.md) and
 [package documentation](https://github.com/JWSound/boundary-lab/blob/main/docs/Inputs%20and%20Outputs.md).
+
+## Projects and audience planes
+
+The Projects screen appears at every launch. Recent projects are stored locally,
+ordered by most recently opened or saved, with dates read from the files themselves.
+Unavailable files stay listed so temporarily disconnected drives do not erase the
+history. Use **Open project** to locate a moved file. Choose **Projects** in the
+workspace breadcrumb to return; unsaved edits require confirmation before leaving.
+
+**New** starts without speakers, meshes, microphones, or audience planes. Import a
+speaker package and add scene objects as needed. Empty projects can be saved and
+reopened. The bundled S218BP study remains available through **Open example**.
+
+Each audience plane has its own position, orientation, dimensions, resolution, and
+display mode. SPL limits, pressure scale, and banding apply globally to all planes,
+including newly added or pasted planes. These settings are saved with the project
+and remain available after all planes are removed. Pattern coverage updates for all planes. Boundary/Coupled field
+solving evaluates every plane in sequence; Boundary reuses the cabinet solution
+between planes. More planes add field-evaluation work. Select a plane to inspect
+its settings and legend. Field solving requires at least one plane; microphone
+and speaker-response sweeps remain available without a plane.
+
+Saved projects now use schema v8. Existing v5-v7 projects open with their original
+plane preserved. Older Deploy versions cannot open newly saved v8 files.
 
 ## Scene and controls
 
@@ -46,7 +71,7 @@ For headless exports, use `--viewport-model cabinet.obj --viewport-model-scale 0
 to attach a model expressed in centimeters (`1` for meters, `0.001` for millimeters).
 
 The library contains reusable speaker packages and rigid-mesh assets. The scene
-contains their placed instances, microphones, and the audience plane. Selecting
+contains their placed instances, microphones, and any number of audience planes. Selecting
 an item exposes its properties. Positions and distances in Deploy are in metres;
 angles are in degrees. Scene Y is height, with the ground at Y = 0.
 
@@ -58,7 +83,9 @@ angles are in degrees. Scene Y is height, with the ground at Y = 0.
   do not rotate.
 - Cabinet and rigid-object corner handles support placement and snapping. Direct
   dragging is ground-parallel; snapping to another height can change elevation.
-- Select the audience plane to move or rotate it. **R** enables corner resizing
+- Use **Add audience plane** in the scene header to create a plane. Select a plane
+  in the scene objects/hierarchy list to move or rotate it. Planes do not intercept
+  viewport selection clicks. Remove selected planes with **Delete**. **R** enables corner resizing
   of the plane, not scaling of cabinets.
 - Use the viewport camera controls to inspect the arrangement; camera movement
   does not change source orientation or acoustic geometry.
@@ -230,11 +257,9 @@ For numerical assumptions and validation, continue to the [System Model](system-
 ## Clipboard and history shortcuts
 
 Use **Ctrl+X**, **Ctrl+C**, and **Ctrl+V** to cut, copy, and paste single or mixed
-selections of speakers, rigid objects, and microphones. Paste creates fresh IDs,
+selections of speakers, rigid objects, microphones, and audience planes. Paste creates fresh IDs,
 selects the new objects, and moves the whole group to a clear location while
 preserving relative positions. Cut removes objects only after copying succeeds.
-The audience plane is excluded from clipboard operations because the project has
-one plane; its property and transform edits can still be undone.
 
 **Ctrl+Z** undoes an edit; **Ctrl+Y** or **Ctrl+Shift+Z** redoes it. The Command key
 is also accepted on macOS. These commands are keyboard-only. Text and number

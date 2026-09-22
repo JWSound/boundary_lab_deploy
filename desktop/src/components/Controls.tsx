@@ -84,6 +84,7 @@ export function PackageCard({
 }
 
 export function SceneTree({
+  audiencePlanes,
   packages,
   rigidMeshes,
   sources,
@@ -93,6 +94,7 @@ export function SceneTree({
   activeId,
   onSelect,
 }: {
+  audiencePlanes: import("../model/types").AudiencePlane[];
   packages: LoadedSpeakerPackage[];
   rigidMeshes: RigidMeshAsset[];
   sources: SourceConfiguration[];
@@ -136,12 +138,12 @@ export function SceneTree({
           onClick={(event) => select(microphone.id, event)}
         ><Mic2 size={15} /><span>{microphone.name}</span><em>MIC</em></button>
       ))}
-      <button
-        data-object-id="audience-plane"
-        aria-selected={selectedIds.includes("audience-plane")}
-        className={`tree-row tree-button ${selectedIds.includes("audience-plane") ? "selected" : ""} ${activeId === "audience-plane" ? "active-selection" : ""}`}
-        onClick={(event) => select("audience-plane", event)}
-      ><Grid3X3 size={15} /><span>Audience plane</span><em>PLANE</em></button>
+      {audiencePlanes.map(plane => <button key={plane.id}
+        data-object-id={plane.id}
+        aria-selected={selectedIds.includes(plane.id)}
+        className={`tree-row tree-button ${selectedIds.includes(plane.id) ? "selected" : ""} ${activeId === plane.id ? "active-selection" : ""}`}
+        onClick={(event) => select(plane.id, event)}
+      ><Grid3X3 size={15} /><span>{plane.name}</span><em>PLANE</em></button>)}
     </div>
   );
 }
@@ -452,7 +454,7 @@ export function PlaneResolutionInspector({
         </label>
       </div>
       {value.displayMode === "spl" ? <>
-        <SectionHeader icon={Palette} title="Heatmap" />
+        <SectionHeader icon={Palette} title="Heatmap (all planes)" />
         <div className="inspector-section">
           <div className="two-column-fields">
             <NumberField label="Scale minimum" value={value.heatmapMinimumDb} unit="dB" step={1} maximum={value.heatmapMaximumDb - 1} onChange={(next) => set("heatmapMinimumDb", next)} />
@@ -461,7 +463,7 @@ export function PlaneResolutionInspector({
           <Slider label="Banding" value={value.heatmapBandingDb} minimum={0} maximum={12} step={1} unit=" dB" onChange={(next) => set("heatmapBandingDb", next)} />
         </div>
       </> : <>
-        <SectionHeader icon={Palette} title="Pressure" />
+        <SectionHeader icon={Palette} title="Pressure (shared scale)" />
         <div className="inspector-section">
           <Slider label="Scale" value={value.pressureScalePa} minimum={1} maximum={100} step={1} unit=" Pa" onChange={(next) => set("pressureScalePa", next)} />
           <label className="control-row toggle-row">

@@ -241,3 +241,5 @@ export interface MicrophoneSweepResult {
   total_count: number;
   pipeline?: Record<string, number>;
 }
+
+export type AudiencePlane = ObservationPlane & { id: string; name: string };

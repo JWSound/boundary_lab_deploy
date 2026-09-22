@@ -6,6 +6,7 @@
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
+    "test:projects": "esbuild tests/projects.test.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/projects.test.mjs && node node_modules/.tmp/projects.test.mjs && node --test tests/recentProjects.test.cjs",
     "test:editing-ui": "electron tests/sceneEditing.cjs",
     "test:editing": "esbuild tests/sceneEditing.test.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/sceneEditing.test.mjs && node node_modules/.tmp/sceneEditing.test.mjs",
     "test:viewport": "esbuild tests/viewportModel.test.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/viewportModel.test.mjs && node node_modules/.tmp/viewportModel.test.mjs",

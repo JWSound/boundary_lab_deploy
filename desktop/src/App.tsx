@@ -1,5 +1,6 @@
+import { planeScale } from "./model/planeScale";
 import { FidelitySwitcher } from "./components/FidelitySwitcher";
-import { peakExcursionMillimeters, electricalSample, emptyFieldFrame, emptySolvedFieldCache, defaultSources, buildRigidInstance, observationAcousticState, formatFrequency, type SolvedFieldCache } from "./model/sceneState";
+import { peakExcursionMillimeters, electricalSample, emptyFieldFrame, emptySolvedFieldCache, defaultSources, defaultObservation, buildRigidInstance, observationAcousticState, formatFrequency, type SolvedFieldCache } from "./model/sceneState";
 import {
   ChevronRight,
   Box,
@@ -45,6 +46,8 @@ import {
 import { loadSpeakerPackage } from "./io/speakerPackage";
 import { loadRigidMesh } from "./io/rigidMesh";
 import { createDeployProject, parseDeployProject, serializeDeployProject, type DeployProject } from "./io/deployProject";
+import { createDemoPackage } from "./model/demoPackage";
+import { ProjectsScreen, type ProjectStart } from "./components/ProjectsScreen";
 import { useSceneEditor } from "./model/useSceneEditor";
 import { copySelection, pasteSelection, removeSelection, selectedObjectIds } from "./model/sceneClipboard";
 import {
@@ -63,14 +66,33 @@ import { applyChannelProcessing, CHANNEL_COLORS, createDefaultChannel } from "./
 import type { DeployChannel } from "./model/types";
 
 export function App() {
+  const [start, setStart] = useState<ProjectStart | null>(null);
+  return start ? <ProjectWorkspace start={start} onProjects={() => setStart(null)} /> : <ProjectsScreen onStart={setStart} />;
+}
+
+const EMPTY_FREQUENCIES = new Float64Array([80]);
+function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjects: () => void }) {
   const { editor, present,
     setPackages, setActivePackageId, setSourceConfigs, setChannels, setActiveChannelId,
-    setRigidMeshes, setActiveRigidMeshId, setRigidObjects, setMicrophones, setObservation,
+    setRigidMeshes, setActiveRigidMeshId, setRigidObjects, setMicrophones, setAudiencePlanes, setActivePlaneId,
     setFrequencyIndex, setFidelity, setSelectedInstances, setProjectName } = useSceneEditor();
   const { packages, activePackageId, sourceConfigs, channels, activeChannelId, rigidMeshes,
-    activeRigidMeshId, rigidObjects, microphones, observation, frequencyIndex, fidelity,
+    activeRigidMeshId, rigidObjects, microphones, audiencePlanes, heatmapScale, activePlaneId, frequencyIndex, fidelity,
     selectedInstances, projectName } = present;
   const pkg = packages.find((candidate) => candidate.id === activePackageId) ?? packages[0];
+  const frequenciesHz = pkg?.frequenciesHz ?? EMPTY_FREQUENCIES;
+  const activePlane = audiencePlanes.find(p => p.id === activePlaneId) ?? audiencePlanes[0];
+  const observation = activePlane ?? defaultObservation;
+  const setObservation = (value: ObservationPlane | ((current: ObservationPlane) => ObservationPlane)) => {
+    const scene = editor.present;
+    const current = scene.audiencePlanes.find(p => p.id === activePlane?.id);
+    if (!current) return;
+    const next = typeof value === "function" ? value(current) : value;
+    const scale = planeScale(next);
+    editor.update({ ...scene, heatmapScale: scale, audiencePlanes: scene.audiencePlanes.map(p => ({
+      ...(p.id === current.id ? { ...next, id: p.id, name: p.name } : p), ...scale,
+    })) }, "Edit audience plane");
+  };
   const [phaseAnimationEnabled, setPhaseAnimationEnabled] = useState(false);
   const clipboardPending = useRef(false);
   const browserClipboard = useRef("");
@@ -85,7 +107,7 @@ export function App() {
   const [liveSolveEnabled, setLiveSolveEnabled] = useState(false);
   const [transformMode, setTransformMode] = useState<SceneTransformMode>("select");
   const [angleSnapDisabled, setAngleSnapDisabled] = useState(false);
-  const [projectFileName, setProjectFileName] = useState("s218bp-subwoofer-study.blabdeploy.json");
+  const [projectFileName, setProjectFileName] = useState("untitled.blabdeploy.json");
   const [savedProjectSnapshot, setSavedProjectSnapshot] = useState<string | null>(null);
   const [solveReleaseRevision, setSolveReleaseRevision] = useState(0);
   const [speakerManipulationActive, setSpeakerManipulationActive] = useState(false);
@@ -242,14 +264,14 @@ export function App() {
   const commonMinimumFrequencyHz = Math.max(...acousticPackages.map((item) => Math.min(...item.frequenciesHz)));
   const commonMaximumFrequencyHz = Math.min(...acousticPackages.map((item) => Math.max(...item.frequenciesHz)));
   const sortedFrequencyIndices = useMemo(
-    () => Array.from(pkg.frequenciesHz.keys())
-      .filter((index) => pkg.frequenciesHz[index] >= commonMinimumFrequencyHz && pkg.frequenciesHz[index] <= commonMaximumFrequencyHz)
-      .sort((a, b) => pkg.frequenciesHz[a] - pkg.frequenciesHz[b]),
+    () => Array.from(frequenciesHz.keys())
+      .filter((index) => frequenciesHz[index] >= commonMinimumFrequencyHz && frequenciesHz[index] <= commonMaximumFrequencyHz)
+      .sort((a, b) => frequenciesHz[a] - frequenciesHz[b]),
     [commonMaximumFrequencyHz, commonMinimumFrequencyHz, pkg],
   );
   const usableFrequencyIndices = sortedFrequencyIndices.length > 0
     ? sortedFrequencyIndices
-    : Array.from(pkg.frequenciesHz.keys()).sort((a, b) => pkg.frequenciesHz[a] - pkg.frequenciesHz[b]);
+    : Array.from(frequenciesHz.keys()).sort((a, b) => frequenciesHz[a] - frequenciesHz[b]);
   const sortedPosition = Math.max(0, usableFrequencyIndices.indexOf(frequencyIndex));
   useEffect(() => {
     if (!usableFrequencyIndices.includes(frequencyIndex)) editor.set("frequencyIndex", usableFrequencyIndices[0], false);
@@ -264,7 +286,7 @@ export function App() {
     () => cabinetClearanceViolations(boundaryAssetById, [...sources, ...rigidInstances]).length === 0,
     [boundaryAssetById, rigidInstances, sources],
   );
-  const selectedFrequencyHz = pkg.frequenciesHz[frequencyIndex];
+  const selectedFrequencyHz = frequenciesHz[frequencyIndex];
   const patternLookups = useMemo(
     () => buildPackagePatternLookups(acousticPackages, selectedFrequencyHz),
     [acousticPackages, selectedFrequencyHz],
@@ -289,14 +311,12 @@ export function App() {
     [microphones, selectedInstances],
   );
   const selectedSourcePackage = selectedSource ? packageById.get(selectedSource.packageId) ?? pkg : pkg;
-  const sourceMinimumHeightM = minimumSourceHeightM(selectedSourcePackage);
-  const observationAcousticKey = JSON.stringify(observationAcousticState(observation));
-  const patternField = useMemo(
-    () => sourceConfigs.length > 0
-      ? computeMixedFieldFrame(packageById, patternLookups, sources, drivenSourceConfigs, observation, selectedFrequencyHz)
-      : emptyFieldFrame(observation),
-    [drivenSourceConfigs, packageById, patternLookups, sources, observationAcousticKey, selectedFrequencyHz],
-  );
+  const sourceMinimumHeightM = selectedSourcePackage ? minimumSourceHeightM(selectedSourcePackage) : 0;
+  const observationAcousticKey = JSON.stringify(audiencePlanes.map(p => ({ id: p.id, ...observationAcousticState(p) })));
+  const patternFields = useMemo(() => Object.fromEntries(audiencePlanes.map(p => [p.id, sourceConfigs.length > 0
+    ? computeMixedFieldFrame(packageById, patternLookups, sources, drivenSourceConfigs, p, selectedFrequencyHz)
+    : emptyFieldFrame(p)])), [drivenSourceConfigs, packageById, patternLookups, sources, observationAcousticKey, selectedFrequencyHz]);
+  const patternField = activePlane ? patternFields[activePlane.id] : emptyFieldFrame(defaultObservation);
   const microphonePatternResponses = useMemo(
     () => sourceConfigs.length > 0
       ? computeMixedMicrophonePatternResponses(packageById, sources, drivenSourceConfigs, microphones)
@@ -314,21 +334,21 @@ export function App() {
   const currentSolveKey = useMemo(() => JSON.stringify({
     fidelity,
     packages: sourceConfigs.map((source) => source.packageId),
-    frequency: pkg.frequenciesHz[frequencyIndex],
+    frequency: frequenciesHz[frequencyIndex],
     sources: drivenSourceConfigs,
     rigidObjects,
     observation: observationAcousticKey,
-  }), [drivenSourceConfigs, fidelity, pkg.id, pkg.frequenciesHz, frequencyIndex, rigidObjects, observationAcousticKey]);
+  }), [drivenSourceConfigs, fidelity, pkg?.id, frequenciesHz, frequencyIndex, rigidObjects, observationAcousticKey]);
   const currentGeometryKey = useMemo(() => JSON.stringify({
     fidelity,
     packages: sourceConfigs.map((source) => source.packageId),
-    frequency: pkg.frequenciesHz[frequencyIndex],
+    frequency: frequenciesHz[frequencyIndex],
     sources: sourceConfigs.map(({ id, packageId, positionX, positionHeightM, positionZ, pitchDeg, yawDeg, rollDeg }) => ({ id, packageId, positionX, positionHeightM, positionZ, pitchDeg, yawDeg, rollDeg })),
     rigidObjects,
-  }), [fidelity, pkg.id, pkg.frequenciesHz, frequencyIndex, rigidObjects, sourceConfigs]);
+  }), [fidelity, pkg?.id, frequenciesHz, frequencyIndex, rigidObjects, sourceConfigs]);
   const selectedSolvedField = fidelity === "pattern" ? null : solvedFields[fidelity];
   const field = selectedSolvedField?.key === currentSolveKey
-    ? selectedSolvedField.field
+    ? (activePlane ? selectedSolvedField.fields?.[activePlane.id] ?? patternField : patternField)
     : patternField;
   const boundaryCurrent = selectedSolvedField?.key === currentSolveKey;
   const level2Package = activeSourcePackageIds.length > 0 ? packageById.get(activeSourcePackageIds[0]) ?? null : null;
@@ -421,9 +441,10 @@ export function App() {
     sourceConfigs,
     rigidObjects,
     microphones,
-    observation,
-    pkg.frequenciesHz[frequencyIndex],
+    audiencePlanes,
+    frequenciesHz[frequencyIndex],
     fidelity,
+    heatmapScale,
   ));
   const projectEdited = savedProjectSnapshot === null || savedProjectSnapshot !== currentProjectContents;
   const captureCurrentAnalysis = () => {
@@ -463,6 +484,9 @@ export function App() {
     setChannels([defaultChannel]);
     setActiveChannelId(defaultChannel.id);
     setSourceConfigs(defaultSources(next));
+    editor.set("heatmapScale", planeScale());
+    setAudiencePlanes([{ ...defaultObservation, id: "audience-plane", name: "Audience plane" }]);
+    setActivePlaneId("audience-plane");
     setRigidMeshes([]);
     setActiveRigidMeshId(null);
     setRigidObjects([]);
@@ -481,6 +505,8 @@ export function App() {
     setDriverExcursion(null);
     setElectricalResponse(null);
     setAcousticResponse(null);
+    setRawSweeps({}); setResponseHistory({}); setRetainedExcursion(null); setRetainedElectrical(null);
+    setCaptures([]); setVisibleCaptureIds(new Set());
     setTransformMode("select");
     setProjectName(`${next.manifest.name} Subwoofer Study`);
     setProjectFileName(`${next.manifest.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "deploy"}-study.blabdeploy.json`);
@@ -498,7 +524,7 @@ export function App() {
       return updated;
     });
     setActivePackageId(next.id);
-    setFrequencyIndex(nearestFrequencyIndex(next, pkg.frequenciesHz[frequencyIndex]));
+    setFrequencyIndex(nearestFrequencyIndex(next, frequenciesHz[frequencyIndex]));
     setError(null);
   };
 
@@ -541,12 +567,12 @@ export function App() {
       nextBoundaryAssets,
       [...nextSources.map(buildSourceInstance), ...nextRigidObjects.map(buildRigidInstance)],
     );
-    const nextFrequencyIndex = nearestFrequencyIndex(nextPackage, project.selected_frequency_hz);
+    const nextFrequencyIndex = nextPackage ? nearestFrequencyIndex(nextPackage, project.selected_frequency_hz) : 0;
     const requestedSolverFidelity = project.requested_fidelity === "boundary" ||
       project.requested_fidelity === "coupled";
     const nextFidelity: Fidelity = requestedSolverFidelity &&
       Boolean(
-        window.boundaryLabDesktop && nextPackage.sourcePath &&
+        window.boundaryLabDesktop && nextPackage?.sourcePath &&
         nextSources.every((source) => {
           const sourcePackage = nextPackageById.get(source.packageId);
           return sourcePackage?.sourcePath && sourcePackage.manifest.fidelity_level >= (project.requested_fidelity === "coupled" ? 3 : 2) &&
@@ -563,24 +589,27 @@ export function App() {
       nextSources,
       nextRigidObjects,
       project.microphones,
-      project.observation_plane,
-      nextPackage.frequenciesHz[nextFrequencyIndex],
+      project.audience_planes,
+      nextPackage?.frequenciesHz[nextFrequencyIndex] ?? 80,
       nextFidelity,
+      project.heatmap_scale,
     ));
     setPackages(nextPackages);
     setRigidMeshes(nextRigidMeshes);
     setActiveRigidMeshId(nextRigidMeshes[0]?.id ?? null);
     setRigidObjects(nextRigidObjects);
     rigidObjectsRef.current = nextRigidObjects;
-    setActivePackageId(nextPackage.id);
+    setActivePackageId(nextPackage?.id ?? "");
     setChannels(project.channels);
     setActiveChannelId(project.channels[0].id);
     setSourceConfigs(nextSources);
     sourceConfigsRef.current = nextSources;
     setMicrophones(project.microphones);
     microphonesRef.current = project.microphones;
-    setObservation(project.observation_plane);
-    observationRef.current = project.observation_plane;
+    editor.set("heatmapScale", project.heatmap_scale);
+    setAudiencePlanes(project.audience_planes);
+    setActivePlaneId(project.audience_planes[0]?.id ?? null);
+    observationRef.current = project.audience_planes[0] ?? defaultObservation;
     setFrequencyIndex(nextFrequencyIndex);
     setFidelity(nextFidelity);
     setSelectedInstances(nextSources[0] ? [nextSources[0].id] : []);
@@ -595,6 +624,8 @@ export function App() {
     setDriverExcursion(null);
     setElectricalResponse(null);
     setAcousticResponse(null);
+    setRawSweeps({}); setResponseHistory({}); setRetainedExcursion(null); setRetainedElectrical(null);
+    setCaptures([]); setVisibleCaptureIds(new Set());
     setTransformMode("select");
     setProjectName(project.name);
     setProjectFileName(fileName);
@@ -687,19 +718,6 @@ export function App() {
     });
   }), []);
 
-  useEffect(() => {
-    let active = true;
-    if (!window.boundaryLabDesktop) return () => { active = false; };
-    void window.boundaryLabDesktop.loadBundledExample()
-      .then((selection) => {
-        if (active && selection) initializePackage(loadSpeakerPackage(selection.bytes, selection.name, selection.path));
-      })
-      .catch((caught) => {
-        if (active) setError(caught instanceof Error ? caught.message : String(caught));
-      });
-    return () => { active = false; };
-  }, []);
-
   const openPackage = async () => {
     try {
       if (window.boundaryLabDesktop) {
@@ -754,30 +772,55 @@ export function App() {
     }
   };
 
+  const applyDesktopSelection = (selection: DesktopProjectSelection) => {
+    const project = parseDeployProject(selection.contents);
+    if (selection.packages.length !== project.packages.length) {
+      throw new Error("One or more speaker packages referenced by this project were not located.");
+    }
+    if (selection.rigidMeshes.length !== project.rigid_meshes.length) {
+      throw new Error("One or more rigid meshes referenced by this project were not located.");
+    }
+    const nextPackages = selection.packages.map((item, index) => ({
+      ...loadSpeakerPackage(item.bytes, item.name, item.path),
+      id: project.packages[index].id,
+    }));
+    const nextRigidMeshes = selection.rigidMeshes.map((item, index) => {
+      const reference = project.rigid_meshes[index];
+      const loaded = loadRigidMesh(item.bytes, item.name, item.path, reference.scale_to_meters);
+      if (loaded.id !== reference.id) throw new Error(`Located mesh does not match ${reference.name}.`);
+      return { ...loaded, name: reference.name };
+    });
+    applyProject(project, nextPackages, nextRigidMeshes, selection.name);
+    void window.boundaryLabDesktop?.rememberProject(selection.path, project.name).catch(() => {});
+  };
+  useEffect(() => {
+    let active = true;
+    if (start.kind === "project") {
+      try { applyDesktopSelection(start.selection); } catch (caught) { setError(String(caught)); }
+    } else if (start.kind === "example") {
+      void (async () => {
+        try {
+          const selection = await window.boundaryLabDesktop?.loadBundledExample();
+          if (!active) return;
+          if (window.boundaryLabDesktop && !selection) throw new Error("The bundled S218BP example could not be found.");
+          initializePackage(selection ? loadSpeakerPackage(selection.bytes, selection.name, selection.path) : createDemoPackage());
+        } catch (caught) { if (active) setError(String(caught)); }
+      })();
+    } else { setSavedProjectSnapshot(currentProjectContents); }
+    return () => {
+      active = false;
+      solveGeneration.current++; sweepGeneration.current++; microphoneSweepKeyRef.current = null;
+      void window.boundaryLabDesktop?.cancelMicrophoneSweep().catch(() => {});
+    };
+  }, []);
+
   const openProject = async () => {
     try {
       if (projectEdited && !window.confirm("Open another project and discard unsaved changes?")) return;
       if (window.boundaryLabDesktop) {
         const selection = await window.boundaryLabDesktop.openProject();
         if (!selection) return;
-        const project = parseDeployProject(selection.contents);
-        if (selection.packages.length !== project.packages.length) {
-          throw new Error("One or more speaker packages referenced by this project were not located.");
-        }
-        if (selection.rigidMeshes.length !== project.rigid_meshes.length) {
-          throw new Error("One or more rigid meshes referenced by this project were not located.");
-        }
-        const nextPackages = selection.packages.map((item, index) => ({
-          ...loadSpeakerPackage(item.bytes, item.name, item.path),
-          id: project.packages[index].id,
-        }));
-        const nextRigidMeshes = selection.rigidMeshes.map((item, index) => {
-          const reference = project.rigid_meshes[index];
-          const loaded = loadRigidMesh(item.bytes, item.name, item.path, reference.scale_to_meters);
-          if (loaded.id !== reference.id) throw new Error(`Located mesh does not match ${reference.name}.`);
-          return { ...loaded, name: reference.name };
-        });
-        applyProject(project, nextPackages, nextRigidMeshes, selection.name);
+        applyDesktopSelection(selection);
       } else {
         projectFileInput.current?.click();
       }
@@ -841,10 +884,11 @@ export function App() {
     setSolveState("solving");
     setSolveMessage("Starting BEAT CUDA worker");
     setError(null);
-    if (!patternField.validMask.some((value) => value !== 0)) {
+    if (!audiencePlanes.length) { setLiveSolveEnabled(false); setSolveState("idle"); return; }
+    if (!Object.values(patternFields).some(frame => frame.validMask.some(value => value !== 0))) {
       setSolvedFields((current) => ({
         ...current,
-        [coupled ? "coupled" : "boundary"]: { key: requestedKey, field: patternField },
+        [coupled ? "coupled" : "boundary"]: { key: requestedKey, field: patternField, fields: patternFields },
       }));
       setSolveRevision((revision) => revision + 1);
       setSolveState("complete");
@@ -853,56 +897,64 @@ export function App() {
     }
     try {
       const rendererRequestStarted = performance.now();
-      const reuseBoundary = !coupled && boundaryGeometryKey === requestedGeometryKey;
-      const request: DesktopLevel2SolveRequest = {
-        packagePath: level2Package.sourcePath,
-        packagePaths: solvePackagePaths,
-        frequencyHz: pkg.frequenciesHz[frequencyIndex],
-        backend: "cuda",
-        fidelity: coupled ? "coupled" : "boundary",
-        sources: drivenSourceConfigs,
-        rigidObjects: rigidObjects.map((object) => ({
-          ...object,
-          meshPath: rigidMeshById.get(object.assetId)?.sourcePath ?? "",
-          scaleToMeters: rigidMeshById.get(object.assetId)?.scaleToMeters ?? 0.001,
-        })),
-        observation,
-        solutionKey: requestedGeometryKey,
-        reuseBoundary,
-        includeComplexPressure: true,
-      };
-      let result;
-      try {
-        result = await window.boundaryLabDesktop.solveLevel2(request);
-      } catch (reuseError) {
-        if (!reuseBoundary) throw reuseError;
-        setBoundaryGeometryKey(null);
-        result = await window.boundaryLabDesktop.solveLevel2({ ...request, reuseBoundary: false });
+      let boundaryReady = boundaryGeometryKey === requestedGeometryKey;
+      const nextFields: Record<string, FieldFrame> = {};
+      for (const plane of audiencePlanes) {
+        if (generation !== solveGeneration.current) return;
+        if (!patternFields[plane.id].validMask.some(value => value !== 0)) { nextFields[plane.id] = patternFields[plane.id]; continue; }
+        const reuseBoundary = !coupled && boundaryReady;
+        const request: DesktopLevel2SolveRequest = {
+          packagePath: level2Package.sourcePath,
+          packagePaths: solvePackagePaths,
+          frequencyHz: frequenciesHz[frequencyIndex],
+          backend: "cuda",
+          fidelity: coupled ? "coupled" : "boundary",
+          sources: drivenSourceConfigs,
+          rigidObjects: rigidObjects.map((object) => ({
+            ...object,
+            meshPath: rigidMeshById.get(object.assetId)?.sourcePath ?? "",
+            scaleToMeters: rigidMeshById.get(object.assetId)?.scaleToMeters ?? 0.001,
+          })),
+          observation: plane,
+          solutionKey: requestedGeometryKey,
+          reuseBoundary,
+          includeComplexPressure: true,
+        };
+        let result;
+        try {
+          result = await window.boundaryLabDesktop.solveLevel2(request);
+        } catch (reuseError) {
+          if (!reuseBoundary) throw reuseError;
+          setBoundaryGeometryKey(null);
+          result = await window.boundaryLabDesktop.solveLevel2({ ...request, reuseBoundary: false });
+        }
+        if (generation !== solveGeneration.current) return;
+        const rendererResultReceived = performance.now();
+        const fieldParseStarted = performance.now();
+        if (!result.field_pressure) throw new Error("The solver did not return complex field pressure.");
+        const nextField = fieldFrameFromSpl(result.spl_db, result.columns, result.rows, result.sample_indices, result.field_pressure);
+        const fieldParseSeconds = (performance.now() - fieldParseStarted) / 1000;
+        pendingRenderProfile.current = {
+          generation,
+          columns: result.columns,
+          rows: result.rows,
+          sample_count: result.spl_db.length,
+          julia: result.timings,
+          pipeline: result.pipeline ?? {},
+          renderer: {
+            ipc_roundtrip_s: (rendererResultReceived - rendererRequestStarted) / 1000,
+            field_frame_parse_s: fieldParseSeconds,
+            received_numeric_values:
+              result.spl_db.length + result.sample_indices.length +
+              (result.field_pressure?.real.length ?? 0) + (result.field_pressure?.imag.length ?? 0),
+          },
+        };
+        nextFields[plane.id] = nextField;
+        boundaryReady = true;
       }
-      if (generation !== solveGeneration.current) return;
-      const rendererResultReceived = performance.now();
-      const fieldParseStarted = performance.now();
-      if (!result.field_pressure) throw new Error("The solver did not return complex field pressure.");
-      const nextField = fieldFrameFromSpl(result.spl_db, result.columns, result.rows, result.sample_indices, result.field_pressure);
-      const fieldParseSeconds = (performance.now() - fieldParseStarted) / 1000;
-      pendingRenderProfile.current = {
-        generation,
-        columns: result.columns,
-        rows: result.rows,
-        sample_count: result.spl_db.length,
-        julia: result.timings,
-        pipeline: result.pipeline ?? {},
-        renderer: {
-          ipc_roundtrip_s: (rendererResultReceived - rendererRequestStarted) / 1000,
-          field_frame_parse_s: fieldParseSeconds,
-          received_numeric_values:
-            result.spl_db.length + result.sample_indices.length +
-            (result.field_pressure?.real.length ?? 0) + (result.field_pressure?.imag.length ?? 0),
-        },
-      };
       setSolvedFields((current) => ({
         ...current,
-        [coupled ? "coupled" : "boundary"]: { key: requestedKey, field: nextField },
+        [coupled ? "coupled" : "boundary"]: { key: requestedKey, field: nextFields[audiencePlanes[0].id], fields: nextFields },
       }));
       if (!coupled) setBoundaryGeometryKey(requestedGeometryKey);
       setSolveRevision((revision) => revision + 1);
@@ -915,7 +967,7 @@ export function App() {
       setSolveMessage(`${fidelityLabel} solve failed`);
       setError(caught instanceof Error ? caught.message : String(caught));
     }
-  }, [solvePackagePaths, boundaryGeometryKey, currentGeometryKey, currentSolveKey, drivenSourceConfigs, fidelity, frequencyIndex, level2Package, observation, patternField, pkg.frequenciesHz, rigidMeshById, rigidObjects]);
+  }, [solvePackagePaths, boundaryGeometryKey, currentGeometryKey, currentSolveKey, drivenSourceConfigs, fidelity, frequencyIndex, level2Package, audiencePlanes, patternFields, patternField, frequenciesHz, rigidMeshById, rigidObjects]);
 
   const stopMicrophoneSweep = useCallback(async () => {
     if (!window.boundaryLabDesktop || microphoneSweepState !== "solving") return;
@@ -1141,16 +1193,15 @@ export function App() {
     } : microphone);
     microphonesRef.current = next;
     setMicrophones(next);
-    if (selectedInstances.includes("audience-plane")) {
-      const currentObservation = observationRef.current;
+    for (const currentObservation of editor.present.audiencePlanes.filter(p => selectedInstances.includes(p.id))) {
       const nextObservation = {
         ...currentObservation,
         centerXM: currentObservation.centerXM + delta.x,
         heightM: currentObservation.heightM + delta.y,
         nearM: currentObservation.nearM + delta.z,
       };
-      observationRef.current = nextObservation;
-      setObservation(nextObservation);
+
+      setAudiencePlanes(current => current.map(p => p.id === currentObservation.id ? nextObservation : p));
     }
   };
 
@@ -1214,16 +1265,15 @@ export function App() {
       microphonesRef.current = nextMicrophones;
       setMicrophones(nextMicrophones);
     }
-    if (selectedInstances.includes("audience-plane")) {
-      const currentObservation = observationRef.current;
+    for (const currentObservation of editor.present.audiencePlanes.filter(p => selectedInstances.includes(p.id))) {
       const nextObservation = {
         ...currentObservation,
         centerXM: currentObservation.centerXM + appliedDelta.x,
         nearM: currentObservation.nearM + appliedDelta.z,
         heightM: currentObservation.heightM + appliedDelta.y,
       };
-      observationRef.current = nextObservation;
-      setObservation(nextObservation);
+
+      setAudiencePlanes(current => current.map(p => p.id === currentObservation.id ? nextObservation : p));
     }
   };
 
@@ -1370,16 +1420,15 @@ export function App() {
         microphonesRef.current = nextMicrophones;
         setMicrophones(nextMicrophones);
       }
-      if (selectedInstances.includes("audience-plane")) {
-        const currentObservation = observationRef.current;
+      for (const currentObservation of editor.present.audiencePlanes.filter(p => selectedInstances.includes(p.id))) {
         const nextObservation = {
           ...currentObservation,
           centerXM: currentObservation.centerXM + delta.x,
           heightM: currentObservation.heightM + delta.y,
           nearM: currentObservation.nearM + delta.z,
         };
-        observationRef.current = nextObservation;
-        setObservation(nextObservation);
+
+        setAudiencePlanes(current => current.map(p => p.id === currentObservation.id ? nextObservation : p));
       }
     }
   };
@@ -1429,7 +1478,8 @@ export function App() {
       heightM: currentObservation.heightM + positionDelta.y,
     };
     observationRef.current = nextObservation;
-    setObservation(nextObservation);
+    setAudiencePlanes(current => current.map(p => p.id === activePlane?.id ? { ...nextObservation, id: p.id, name: p.name }
+      : selectedInstances.includes(p.id) ? { ...p, centerXM: p.centerXM + positionDelta.x, nearM: p.nearM + positionDelta.z, heightM: p.heightM + positionDelta.y } : p));
     if (selectedMicrophoneIds.length > 0) {
       const movingMicrophones = new Set(selectedMicrophoneIds);
       const nextMicrophones = microphonesRef.current.map((microphone) => movingMicrophones.has(microphone.id) ? {
@@ -1461,6 +1511,7 @@ export function App() {
   };
 
   const selectSceneObject = (id: string | null, additive = false) => {
+    if (audiencePlanes.some(p => p.id === id)) setActivePlaneId(id);
     if (id === null) {
       setSelectedInstances([]);
       setTransformMode("select");
@@ -1476,6 +1527,7 @@ export function App() {
 
   const addSource = (packageId = activePackageId) => {
     const sourcePackage = packageById.get(packageId) ?? pkg;
+    if (!sourcePackage) return;
     const existingIds = new Set([...sourceConfigs.map((source) => source.id), ...rigidObjects.map((object) => object.id)]);
     let suffix = sourceConfigs.length + 1;
     while (existingIds.has(`subwoofer-${suffix}`)) suffix += 1;
@@ -1549,6 +1601,13 @@ export function App() {
     setTransformMode("select");
   };
 
+  const addAudiencePlane = () => {
+    const ids = new Set([...sourceConfigs, ...rigidObjects, ...microphones, ...audiencePlanes].map(o => o.id));
+    let n = 1; while (ids.has(`audience-plane-${n}`)) n++;
+    const plane = { ...defaultObservation, ...heatmapScale, id: `audience-plane-${n}`, name: `Audience plane ${n}`, centerXM: audiencePlanes.length * 2 };
+    editor.run("Add audience plane", () => { setAudiencePlanes(current => [...current, plane]); setActivePlaneId(plane.id); setSelectedInstances([plane.id]); });
+    setTransformMode("select");
+  };
   const addMicrophone = () => {
     const existingIds = new Set([...sourceConfigs.map((source) => source.id), ...microphones.map((microphone) => microphone.id)]);
     let suffix = microphones.length + 1;
@@ -1566,7 +1625,7 @@ export function App() {
   };
 
   const canRemoveSelectedSources = selectedSourceIds.length > 0;
-  const canRemoveSelectedObjects = canRemoveSelectedSources || selectedRigidIds.length > 0 || selectedMicrophoneIds.length > 0;
+  const canRemoveSelectedObjects = canRemoveSelectedSources || selectedRigidIds.length > 0 || selectedMicrophoneIds.length > 0 || audiencePlanes.some(p => selectedInstances.includes(p.id));
 
   const addChannel = () => {
     const existingIds = new Set(channels.map((channel) => channel.id));
@@ -1612,7 +1671,7 @@ export function App() {
     sourceConfigsRef.current = s.sourceConfigs;
     rigidObjectsRef.current = s.rigidObjects;
     microphonesRef.current = s.microphones;
-    observationRef.current = s.observation;
+    observationRef.current = s.audiencePlanes.find(p => p.id === s.activePlaneId) ?? s.audiencePlanes[0] ?? defaultObservation;
   };
   const restoreHistory = (direction: "undo" | "redo") => {
     editor.end();
@@ -1682,7 +1741,7 @@ export function App() {
     const keyDown = (event: KeyboardEvent) => {
       if (event.key === "Alt") setAngleSnapDisabled(true);
       const target = event.target;
-      const transformableSelected = Boolean(selectedSource) || Boolean(selectedRigid) || Boolean(selectedMicrophone) || selectedInstance === "audience-plane";
+      const transformableSelected = Boolean(selectedSource) || Boolean(selectedRigid) || Boolean(selectedMicrophone) || Boolean(activePlane && selectedInstance === activePlane.id);
       if (event.isComposing || (target instanceof Element && target.closest("input:not([type=range]):not([type=checkbox]), textarea, select, [contenteditable]:not([contenteditable='false'])"))) return;
       if (event.ctrlKey || event.metaKey) {
         const key = event.key.toLowerCase();
@@ -1711,7 +1770,7 @@ export function App() {
       } else if (event.key.toLowerCase() === "e" && !selectedMicrophone) {
         event.preventDefault();
         setTransformMode("rotate");
-      } else if (event.key.toLowerCase() === "r" && selectedInstance === "audience-plane") {
+      } else if (event.key.toLowerCase() === "r" && Boolean(activePlane && selectedInstance === activePlane.id)) {
         event.preventDefault();
         setTransformMode("scale");
       }
@@ -1731,7 +1790,7 @@ export function App() {
   });
 
   useEffect(() => {
-    if (!liveSolveEnabled || fidelity === "pattern" || !selectedSolverAvailable) {
+    if (!liveSolveEnabled || fidelity === "pattern" || !selectedSolverAvailable || !audiencePlanes.length) {
       flushLiveSolveRef.current = false;
       return;
     }
@@ -1750,10 +1809,10 @@ export function App() {
       void solveLevel2();
     }, delayMs);
     return () => window.clearTimeout(timeout);
-  }, [currentSolveKey, fidelity, liveSolveEnabled, microphoneSweepState, sceneClearanceValid, selectedSolvedField?.key, selectedSolverAvailable, solveLevel2, solveReleaseRevision, solveState, speakerManipulationActive]);
+  }, [audiencePlanes.length, currentSolveKey, fidelity, liveSolveEnabled, microphoneSweepState, sceneClearanceValid, selectedSolvedField?.key, selectedSolverAvailable, solveLevel2, solveReleaseRevision, solveState, speakerManipulationActive]);
 
   const flushLiveSolve = useCallback(() => {
-    if (!liveSolveEnabled || fidelity === "pattern" || !selectedSolverAvailable) return;
+    if (!liveSolveEnabled || fidelity === "pattern" || !selectedSolverAvailable || !audiencePlanes.length) return;
     flushLiveSolveRef.current = true;
     setSolveReleaseRevision((revision) => revision + 1);
   }, [fidelity, liveSolveEnabled, selectedSolverAvailable]);
@@ -1791,16 +1850,15 @@ export function App() {
           microphonesRef.current = nextMicrophones;
           setMicrophones(nextMicrophones);
         }
-        if (selectedInstances.includes("audience-plane")) {
-          const currentObservation = observationRef.current;
+        for (const currentObservation of editor.present.audiencePlanes.filter(p => selectedInstances.includes(p.id))) {
           const nextObservation = {
             ...currentObservation,
             centerXM: currentObservation.centerXM + correction.x,
             heightM: currentObservation.heightM + correction.y,
             nearM: currentObservation.nearM + correction.z,
           };
-          observationRef.current = nextObservation;
-          setObservation(nextObservation);
+
+          setAudiencePlanes(current => current.map(p => p.id === currentObservation.id ? nextObservation : p));
         }
       }
     }
@@ -1810,10 +1868,10 @@ export function App() {
   }, [boundaryAssetById, constrainSourceConfigs, flushLiveSolve, selectedInstances, selectedMicrophoneIds]);
 
   useEffect(() => {
-    if (fidelity === "pattern" || !selectedSolverAvailable) setLiveSolveEnabled(false);
+    if (fidelity === "pattern" || !selectedSolverAvailable || !audiencePlanes.length) setLiveSolveEnabled(false);
     if (fidelity === "boundary" && !boundaryAvailable) editor.set("fidelity", "pattern", false);
     if (fidelity === "coupled" && !coupledAvailable) editor.set("fidelity", "pattern", false);
-  }, [boundaryAvailable, coupledAvailable, fidelity, selectedSolverAvailable]);
+  }, [boundaryAvailable, coupledAvailable, fidelity, selectedSolverAvailable, audiencePlanes.length]);
 
   return (
     <main
@@ -1825,7 +1883,7 @@ export function App() {
           <div className="brand-mark"><Waves size={20} /></div>
           <div><strong>Boundary Lab</strong><span>DEPLOY</span></div>
         </div>
-        <div className="project-breadcrumb"><span>Projects</span><ChevronRight size={13} /><strong>{projectName}</strong>{projectEdited && <i>Edited</i>}</div>
+        <div className="project-breadcrumb"><button className="text-button" onClick={() => { if (!projectEdited || window.confirm("Return to Projects and discard unsaved changes?")) onProjects(); }}>Projects</button><ChevronRight size={13} /><strong>{projectName}</strong>{projectEdited && <i>Edited</i>}</div>
         <FidelitySwitcher
           value={fidelity}
           onChange={setFidelity}
@@ -1841,7 +1899,7 @@ export function App() {
           <button className="icon-button" title="Settings"><Settings2 size={17} /></button>
           <button
             className={`primary-button ${liveSolveEnabled ? "live" : ""}`}
-            disabled={fidelity === "pattern" || !selectedSolverAvailable}
+            disabled={fidelity === "pattern" || !selectedSolverAvailable || !audiencePlanes.length}
             title={fidelity !== "pattern" ? (liveSolveEnabled ? "Pause automatic solves" : "Start automatic solves as the scene changes") : "Select Boundary or Coupled fidelity to solve"}
             aria-pressed={liveSolveEnabled}
             onClick={() => setLiveSolveEnabled((enabled) => !enabled)}
@@ -1866,7 +1924,7 @@ export function App() {
                   active={item.id === activePackageId}
                   onSelect={() => {
                     setActivePackageId(item.id);
-                    setFrequencyIndex(nearestFrequencyIndex(item, pkg.frequenciesHz[frequencyIndex]));
+                    setFrequencyIndex(nearestFrequencyIndex(item, frequenciesHz[frequencyIndex]));
                   }}
                   onAdd={() => addSource(item.id)}
                 />
@@ -1889,8 +1947,9 @@ export function App() {
               title="Scene objects"
               action={(
                 <div className="section-actions">
-                  <button className="section-action" title="Add active speaker" aria-label="Add speaker" onClick={() => addSource()}><Plus size={14} /></button>
+                  <button className="section-action" title="Add active speaker" aria-label="Add speaker" disabled={!pkg} onClick={() => addSource()}><Plus size={14} /></button>
                   <button className="section-action" title="Add active rigid mesh" aria-label="Add rigid object" disabled={!activeRigidMeshId} onClick={() => addRigidObject()}><Box size={13} /></button>
+                  <button className="section-action" title="Add audience plane" aria-label="Add audience plane" onClick={addAudiencePlane}><Grid3X3 size={14} /></button>
                   <button className="section-action" title="Add microphone" aria-label="Add microphone" onClick={addMicrophone}><Mic2 size={14} /></button>
                   <button
                     className="section-action"
@@ -1902,7 +1961,7 @@ export function App() {
                 </div>
               )}
             />
-            <SceneTree packages={packages} rigidMeshes={rigidMeshes} sources={sourceConfigs} rigidObjects={rigidObjects} microphones={microphones} selectedIds={selectedInstances} activeId={selectedInstance} onSelect={selectSceneObject} />
+            <SceneTree audiencePlanes={audiencePlanes} packages={packages} rigidMeshes={rigidMeshes} sources={sourceConfigs} rigidObjects={rigidObjects} microphones={microphones} selectedIds={selectedInstances} activeId={selectedInstance} onSelect={selectSceneObject} />
           </>
         ) : leftTab === "scene" ? (
           <>
@@ -1911,8 +1970,9 @@ export function App() {
               title="Scene hierarchy"
               action={(
                 <div className="section-actions">
-                  <button className="section-action" title="Add active speaker" aria-label="Add speaker" onClick={() => addSource()}><Plus size={14} /></button>
+                  <button className="section-action" title="Add active speaker" aria-label="Add speaker" disabled={!pkg} onClick={() => addSource()}><Plus size={14} /></button>
                   <button className="section-action" title="Add active rigid mesh" aria-label="Add rigid object" disabled={!activeRigidMeshId} onClick={() => addRigidObject()}><Box size={13} /></button>
+                  <button className="section-action" title="Add audience plane" aria-label="Add audience plane" onClick={addAudiencePlane}><Grid3X3 size={14} /></button>
                   <button className="section-action" title="Add microphone" aria-label="Add microphone" onClick={addMicrophone}><Mic2 size={14} /></button>
                   <button
                     className="section-action"
@@ -1924,13 +1984,13 @@ export function App() {
                 </div>
               )}
             />
-            <SceneTree packages={packages} rigidMeshes={rigidMeshes} sources={sourceConfigs} rigidObjects={rigidObjects} microphones={microphones} selectedIds={selectedInstances} activeId={selectedInstance} onSelect={selectSceneObject} />
+            <SceneTree audiencePlanes={audiencePlanes} packages={packages} rigidMeshes={rigidMeshes} sources={sourceConfigs} rigidObjects={rigidObjects} microphones={microphones} selectedIds={selectedInstances} activeId={selectedInstance} onSelect={selectSceneObject} />
             <div className="scene-summary">
               <span>Subwoofer sources</span><strong>{sourceConfigs.length}</strong>
               <span>Rigid objects</span><strong>{rigidObjects.length}</strong>
-              <span>Observation points</span><strong>{observation.columns * observation.rows}</strong>
+              <span>Observation points</span><strong>{audiencePlanes.reduce((sum, p) => sum + p.columns * p.rows, 0)}</strong>
               <span>Microphones</span><strong>{microphones.length}</strong>
-              <span>Excitation ports</span><strong>{pkg.manifest.excitation_port_ids.length}</strong>
+              <span>Excitation ports</span><strong>{pkg?.manifest.excitation_port_ids.length ?? 0}</strong>
             </div>
           </>
         ) : (
@@ -1953,7 +2013,7 @@ export function App() {
         data-transform-mode={transformMode}
         data-angle-snap-disabled={angleSnapDisabled}
         data-selected-object-count={selectedInstances.length}
-        data-grab-point-count={selectedSource || selectedRigid ? 8 : selectedMicrophone ? 1 : selectedInstance === "audience-plane" && transformMode === "scale" ? 4 : 0}
+        data-grab-point-count={selectedSource || selectedRigid ? 8 : selectedMicrophone ? 1 : Boolean(activePlane && selectedInstance === activePlane.id) && transformMode === "scale" ? 4 : 0}
       >
         <SceneView
           packages={packages}
@@ -1963,6 +2023,7 @@ export function App() {
           microphones={microphones}
           observation={observation}
           field={field}
+          planes={audiencePlanes.map(p => ({ observation: p, field: boundaryCurrent ? selectedSolvedField!.fields?.[p.id] ?? patternFields[p.id] : patternFields[p.id] }))}
           phaseAnimationEnabled={phaseAnimationEnabled}
           selectedInstances={selectedInstances}
           activeInstance={selectedInstance}
@@ -1984,32 +2045,32 @@ export function App() {
           <button className={transformMode === "select" ? "active" : ""} title="Select (Q)" onClick={() => setTransformMode("select")}><MousePointer2 size={15} /></button>
           <button className={transformMode === "translate" ? "active" : ""} disabled={!selectedInstance} title="Translate (W)" onClick={() => setTransformMode("translate")}><Move3D size={15} /></button>
           <button className={transformMode === "rotate" ? "active" : ""} disabled={!selectedInstance || Boolean(selectedMicrophone)} title="Rotate (E)" onClick={() => setTransformMode("rotate")}><Rotate3D size={15} /></button>
-          <button className={transformMode === "scale" ? "active" : ""} disabled={selectedInstance !== "audience-plane"} title="Resize plane (R)" onClick={() => setTransformMode("scale")}><Maximize2 size={15} /></button>
+          <button className={transformMode === "scale" ? "active" : ""} disabled={(!activePlane || selectedInstance !== activePlane.id)} title="Resize plane (R)" onClick={() => setTransformMode("scale")}><Maximize2 size={15} /></button>
         </div>
         <div className="solve-status" data-solve-revision={solveRevision}>
           <span className={solveState === "solving" ? "live-dot solving" : "live-dot"} />
           <div>
             <strong>{fidelity !== "pattern" ? (boundaryCurrent ? `${fidelity === "coupled" ? "Coupled" : "Boundary"} solution` : `${fidelity === "coupled" ? "Coupled" : "Boundary"} preview`) : "Pattern preview"}</strong>
-            <small>{solveState === "solving" ? solveMessage : `${liveSolveEnabled ? "Live" : boundaryCurrent ? "BEAT CUDA" : "Current"} · ${formatFrequency(pkg.frequenciesHz[frequencyIndex])}${fidelity === "pattern" ? " · Rigid ground" : ""}`}</small>
+            <small>{solveState === "solving" ? solveMessage : `${liveSolveEnabled ? "Live" : boundaryCurrent ? "BEAT CUDA" : "Current"} · ${formatFrequency(frequenciesHz[frequencyIndex])}${fidelity === "pattern" ? " · Rigid ground" : ""}`}</small>
           </div>
-          <em>{field.columns} × {field.rows}</em>
         </div>
-        <div className="viewport-color-legend">
-          <div className="legend-title"><span>{observation.displayMode === "spl" ? "SPL" : phaseAnimationEnabled ? "Phase animation" : observation.displayMode === "real_pressure" ? "Real pressure" : "Imaginary pressure"}</span></div>
+        {activePlane && <div className="viewport-color-legend">
+          <div className="legend-title"><span>{activePlane.name} / {observation.displayMode === "spl" ? "SPL" : phaseAnimationEnabled ? "Phase animation" : observation.displayMode === "real_pressure" ? "Real pressure" : "Imaginary pressure"}</span></div>
           <div className={`color-legend ${observation.displayMode === "spl" ? "" : "pressure-color-legend"}`} style={observation.displayMode === "spl" ? { background: heatmapLegendGradient(observation.heatmapMinimumDb, observation.heatmapMaximumDb, observation.heatmapBandingDb) } : undefined} />
           <div className="viewport-legend-values">
             {observation.displayMode === "spl" ? <><span>{observation.heatmapMinimumDb.toFixed(0)}</span><span>{observation.heatmapMaximumDb.toFixed(0)} dB</span></> : <><span>-{observation.pressureScalePa.toFixed(0)}</span><span>0</span><span>+{observation.pressureScalePa.toFixed(0)} Pa</span></>}
           </div>
         </div>
+        }
         <div className="viewport-hint">Ctrl+click: multi-select · Orbit: left drag · Pan: right drag · Zoom: wheel</div>
       </section>
 
       <aside className="right-panel panel">
-        {selectedInstance === "audience-plane" ? (
+        {Boolean(activePlane && selectedInstance === activePlane.id) ? (
           <>
             <div className="inspector-heading">
               <div className="object-icon"><Grid3X3 size={19} /></div>
-              <div><small>{selectedInstances.length > 1 ? `${selectedInstances.length} OBJECTS SELECTED` : "SELECTED OBJECT"}</small><strong>Audience plane</strong></div>
+              <div><small>{selectedInstances.length > 1 ? `${selectedInstances.length} OBJECTS SELECTED` : "SELECTED OBJECT"}</small><strong>{activePlane?.name}</strong></div>
               <button className="icon-button quiet"><SlidersHorizontal size={15} /></button>
             </div>
             <PlaneResolutionInspector
@@ -2124,7 +2185,7 @@ export function App() {
               bem={currentBoundaryResponses}
               coupled={currentCoupledResponses}
               overlays={capturedMicrophones}
-              currentFrequencyHz={pkg.frequenciesHz[frequencyIndex]}
+              currentFrequencyHz={frequenciesHz[frequencyIndex]}
               frequencyPosition={sortedPosition}
               frequencyCount={usableFrequencyIndices.length}
               onFrequencyPositionChange={(position) => setFrequencyIndex(usableFrequencyIndices[position])}
@@ -2137,7 +2198,7 @@ export function App() {
             /> : speakerQuantity === "excursion" ? <DriverExcursionPlot
               data={speakerExcursion}
               coupledSelected={fidelity === "coupled" || speakerExcursion.traces.size > 0}
-              currentFrequencyHz={pkg.frequenciesHz[frequencyIndex]}
+              currentFrequencyHz={frequenciesHz[frequencyIndex]}
               frequencyPosition={sortedPosition}
               frequencyCount={usableFrequencyIndices.length}
               onFrequencyPositionChange={(position) => setFrequencyIndex(usableFrequencyIndices[position])}
@@ -2150,7 +2211,7 @@ export function App() {
               data={(speakerQuantity === "acoustic" || speakerQuantity === "differential") ? speakerAcoustic : speakerElectrical}
               view={speakerQuantity}
               coupledSelected={fidelity === "coupled" || ((speakerQuantity === "acoustic" || speakerQuantity === "differential") ? speakerAcoustic : speakerElectrical).traces.size > 0}
-              currentFrequencyHz={pkg.frequenciesHz[frequencyIndex]}
+              currentFrequencyHz={frequenciesHz[frequencyIndex]}
               frequencyPosition={sortedPosition}
               frequencyCount={usableFrequencyIndices.length}
               onFrequencyPositionChange={(position) => setFrequencyIndex(usableFrequencyIndices[position])}

@@ -1,5 +1,6 @@
 const { app, BrowserWindow, dialog, ipcMain, clipboard } = require("electron");
 const { resolveRuntime } = require("./runtime.cjs");
+const { RecentProjects } = require("./recentProjects.cjs");
 const { DeployWorkerClient } = require("./workerClient.cjs");
 const { readFile, unlink, writeFile } = require("node:fs/promises");
 const { basename, dirname, isAbsolute, join, resolve } = require("node:path");
@@ -7,6 +8,8 @@ const { performance } = require("node:perf_hooks");
 
 const packagedSmoke = process.argv.includes("--packaged-smoke");
 if (packagedSmoke) app.setPath("userData", process.env.DEPLOY_SMOKE_DATA || join(app.getPath("temp"), `deploy-packaged-smoke-${process.pid}`));
+const smokeRecentProjects = process.argv.some(arg => ["--smoke-test", "--smoke-level2", "--benchmark-level2"].includes(arg));
+const recentProjects = new RecentProjects(smokeRecentProjects ? join(app.getPath("temp"), `deploy-recent-smoke-${process.pid}.json`) : join(app.getPath("userData"), "recent-projects.json"));
 const here = __dirname;
 const repositoryRoot = join(here, "../..");
 
@@ -45,6 +48,7 @@ function createWindow() {
         const state = await window.webContents.executeJavaScript(`new Promise((resolve, reject) => {
           const deadline = Date.now() + 30000;
           const check = () => {
+            Array.from(document.querySelectorAll('.projects-screen button')).find(b => b.textContent === 'Open example')?.click();
             const source = document.querySelector('.package-card')?.textContent || '';
             if (source.includes('S218BP')) return resolve({ title: document.title, canvas: Boolean(document.querySelector('canvas')), package: source });
             if (Date.now() > deadline) return reject(new Error('Bundled example did not load'));
@@ -70,6 +74,7 @@ function createWindow() {
       await window.webContents.executeJavaScript(`new Promise((resolve) => {
         const deadline = Date.now() + 10000;
         const check = () => {
+          Array.from(document.querySelectorAll('.projects-screen button')).find(b => b.textContent === 'Open example')?.click();
           const source = document.querySelector('.package-subtitle')?.textContent || '';
           if (source.includes('S218BP_LOD.blabsp') || Date.now() >= deadline) resolve(source);
           else setTimeout(check, 50);
@@ -153,7 +158,7 @@ function createWindow() {
         try {
           packageImportInteraction = await window.webContents.executeJavaScript(`new Promise((resolve) => {
             const sourcesBefore = document.querySelectorAll('.tree-button[data-object-id^="subwoofer-"]').length;
-            document.querySelector('.text-button')?.click();
+            Array.from(document.querySelectorAll('.left-panel .text-button')).find(button => button.textContent === 'Import')?.click();
             const deadline = Date.now() + 10000;
             const checkImported = () => {
               const cards = document.querySelectorAll('.package-card[data-package-id]');
@@ -746,8 +751,14 @@ ipcMain.handle("deploy:open-rigid-mesh", async () => {
   return readPackageSelection(selection.filePaths[0]);
 });
 
-ipcMain.handle("deploy:open-project", async () => {
-  const selection = await dialog.showOpenDialog({
+ipcMain.handle("deploy:recent-projects", () => recentProjects.list());
+ipcMain.handle("deploy:remember-project", async (_event, path, name) => {
+  if (typeof path !== "string" || !isAbsolute(path) || typeof name !== "string") throw new Error("Invalid project reference.");
+  await recentProjects.remember(path, name);
+});
+ipcMain.handle("deploy:open-project", async (_event, recentPath) => {
+  if (recentPath !== undefined && (typeof recentPath !== "string" || !(await recentProjects.list()).some(p => p.path === recentPath))) throw new Error("Unknown recent project.");
+  const selection = recentPath ? { canceled: false, filePaths: [recentPath] } : await dialog.showOpenDialog({
     title: "Open Boundary Lab Deploy project",
     filters: [
       { name: "Boundary Lab Deploy projects", extensions: ["blabdeploy.json"] },
@@ -843,6 +854,8 @@ ipcMain.handle("deploy:save-project", async (_event, contents, suggestedName) =>
   });
   if (selection.canceled || !selection.filePath) return null;
   await writeFile(selection.filePath, contents, "utf8");
+  // Recent-list persistence must not turn a successful save into a failed save.
+  await recentProjects.remember(selection.filePath, JSON.parse(contents).name).catch(error => console.warn("Could not update recent projects", error));
   return selection.filePath;
 });
 
