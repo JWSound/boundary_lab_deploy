@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -30,9 +31,15 @@ from boundary_deploy.solve import (
 )
 
 _EMIT_LOCK = threading.Lock()
+# Terminal events must not reach the client until the job has left its
+# temporary directories and cleared the active slot. Status/results still stream.
+_JOB_EVENTS = threading.local()
 
 
 def _emit(event_type: str, *, request_id: object | None = None, **values: Any) -> dict[str, float | int]:
+    if event_type in {"completed", "cancelled", "failed"} and getattr(_JOB_EVENTS, "defer", False):
+        _JOB_EVENTS.terminal = (event_type, request_id, values)
+        return {}
     payload = {"type": event_type, **values}
     if request_id is not None:
         payload["id"] = request_id
@@ -170,6 +177,24 @@ def _speaker_electrical_result(
     }
 
 
+def _solution_identity(payload: object) -> str:
+    """Identify solved physics, excluding only observation/output controls."""
+    if not isinstance(payload, dict):
+        raise ValueError("Deploy solve request must be an object.")
+    ignored = {"observation", "observationPointsM", "observationShape",
+               "observationSampleIndices", "includeComplexPressure", "reuseBoundary", "solutionKey"}
+    physics = {key: value for key, value in payload.items() if key not in ignored}
+    paths = list(payload.get("packagePaths", {}).values()) or [payload.get("packagePath", "")]
+    paths.extend(item.get("meshPath", "") for item in payload.get("rigidObjects", []))
+    fingerprints = []
+    for value in paths:
+        path = Path(str(value)).expanduser().resolve()
+        stat = path.stat()
+        fingerprints.append((str(path), stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns))
+    encoded = json.dumps([physics, fingerprints], sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return hashlib.sha256(encoded.encode()).hexdigest()
+
+
 def _solve(
     request_id: object,
     payload: object,
@@ -187,7 +212,8 @@ def _solve(
 
     with tempfile.TemporaryDirectory(prefix="blab-deploy-") as temp_dir:
         prepare_started = time.perf_counter()
-        requested_solution_key = str(payload.get("solutionKey", "")) if isinstance(payload, dict) else ""
+        requested_solution_key = _solution_identity(payload)
+        payload = {**payload, "solutionKey": requested_solution_key}
         reuse_boundary = bool(payload.get("reuseBoundary", False)) if isinstance(payload, dict) else False
         field_only = (
             reuse_boundary
@@ -210,6 +236,8 @@ def _solve(
                 cache=solve_cache,
                 status_callback=lambda message: _emit("status", request_id=request_id, message=message),
             )
+        # A failed/cancelled job may have replaced the engine state.
+        solution_keys.pop(worker_key, None)
         prepare_seconds = time.perf_counter() - prepare_started
         request_bytes = request_path.stat().st_size
         julia_started = time.perf_counter()
@@ -240,8 +268,7 @@ def _solve(
                     "python_julia_json_parse_s": float(julia_transport.get("python_julia_json_parse_s", 0.0)),
                     "field_only": int(field_only),
                 }
-                if not field_only:
-                    solution_keys[worker_key] = str(_request.get("solution_key", requested_solution_key))
+                solution_keys[worker_key] = str(_request.get("solution_key", requested_solution_key))
                 result_emit = _emit("result", request_id=request_id, result=result)
                 _emit(
                     "profile",
@@ -533,12 +560,16 @@ def main() -> int:
 
     def run_job(request_id: object, operation: str, payload: object, input_transport: dict[str, float | int]) -> None:
         cancel_event = active["cancel"]
+        _JOB_EVENTS.defer = True
+        _JOB_EVENTS.terminal = None
         try:
             if operation == "microphone_sweep":
+                solution_keys.clear()
                 _microphone_sweep(request_id, payload, workers, solve_cache, cancel_event)
             else:
                 _solve(request_id, payload, workers, input_transport, solve_cache, solution_keys)
         except Exception as exc:
+            solution_keys.clear()
             if cancel_event.is_set():
                 _emit("cancelled", request_id=request_id)
             else:
@@ -546,6 +577,14 @@ def main() -> int:
         finally:
             with active_lock:
                 active.update(thread=None, request_id=None, cancel=None, backend=None)
+                _JOB_EVENTS.defer = False
+                terminal = _JOB_EVENTS.terminal
+                if cancel_event.is_set():
+                    solution_keys.clear()
+                    terminal = ("cancelled", request_id, {})
+                if terminal is not None:
+                    event_type, terminal_id, values = terminal
+                    _emit(event_type, request_id=terminal_id, **values)
 
     _emit("ready", protocol="boundary_lab_deploy_worker", pid=os.getpid())
     try:

@@ -144,3 +144,36 @@ def test_cache_keeps_distinct_packages(monkeypatch, tmp_path):
         assert len(cache.packages) == 2
     finally:
         cache.close()
+
+
+def test_mixed_preparation_reuses_proximity_without_aliasing(mixed, tmp_path, monkeypatch):
+    import copy
+
+    from boundary_deploy import solve
+    payload, cache, _, _ = mixed
+    writes = []
+    original = solve._write_deploy_request
+    def write(path, request):
+        writes.append(path)
+        original(path, request)
+    monkeypatch.setattr(solve, "_write_deploy_request", write)
+    _, first = prepare_deploy_rom_request(payload, tmp_path / "first", cache=cache)
+    assert len(writes) == 1
+    cached = cache.proximity_geometry
+    changed = copy.deepcopy(payload)
+    changed["sources"][0]["levelDb"] = -6
+    changed["frequencyHz"] = 80
+    _, second = prepare_deploy_rom_request(changed, tmp_path / "second", cache=cache)
+    assert cache.proximity_geometry is cached
+    assert first["rom"]["instances"][0]["input_real"] != second["rom"]["instances"][0]["input_real"]
+    second["proximity"]["close_face_pairs"].append([0, 0, 8])
+    _, third = prepare_deploy_rom_request(payload, tmp_path / "third", cache=cache)
+    assert third["proximity"]["close_face_pairs"] == first["proximity"]["close_face_pairs"]
+    moved = copy.deepcopy(payload)
+    moved["sources"][0]["positionX"] -= 1
+    prepare_deploy_rom_request(moved, tmp_path / "moved", cache=cache)
+    assert cache.proximity_geometry[0] != cached[0]
+    invalid = copy.deepcopy(payload)
+    invalid["sources"][2]["positionX"] = invalid["sources"][0]["positionX"]
+    with pytest.raises(ValueError, match="surface spacing"):
+        prepare_deploy_rom_request(invalid, tmp_path / "invalid", cache=cache)

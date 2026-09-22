@@ -53,6 +53,7 @@ class DeploySolveCache:
     packages: dict[tuple[str, int, int], DeployPackageData] = field(default_factory=dict)
     rigid_meshes: dict[tuple[str, int, int], DeployRigidMeshData] = field(default_factory=dict)
     ground_image_pairs: dict[tuple[Any, ...], list[Any]] = field(default_factory=dict)
+    proximity_geometry: tuple[str, Any] | None = None
     sweep_geometries: dict[str, tuple[dict[str, Any], str]] = field(default_factory=dict)
     rom_sweep_stages: dict[tuple[Any, ...], DeployRomSweepStage] = field(default_factory=dict)
     _rom_sweep_temp: tempfile.TemporaryDirectory = field(

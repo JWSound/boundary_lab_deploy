@@ -100,7 +100,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
   const [leftTab, setLeftTab] = useState<"library" | "scene" | "channels">("library");
   const [equalizerPopup, setEqualizerPopup] = useState<{ scope: "channel" | "speaker"; name: string } | null>(null);
   const [solvedFields, setSolvedFields] = useState<SolvedFieldCache>(emptySolvedFieldCache);
-  const [boundaryGeometryKey, setBoundaryGeometryKey] = useState<string | null>(null);
+  const [boundarySolutionKey, setBoundarySolutionKey] = useState<string | null>(null);
   const [solveRevision, setSolveRevision] = useState(0);
   const [solveState, setSolveState] = useState<"idle" | "solving" | "complete" | "error">("idle");
   const [solveMessage, setSolveMessage] = useState("Ready to solve");
@@ -331,21 +331,20 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     microphones,
     frequencies: Array.from(microphonePatternResponses.frequenciesHz),
   }), [drivenSourceConfigs, fidelity, microphonePatternResponses.frequenciesHz, microphones, packages, rigidObjects]);
-  const currentSolveKey = useMemo(() => JSON.stringify({
+  // A solved boundary depends on the processed drives as well as geometry.
+  // Observation planes are deliberately excluded so all planes share a solve.
+  const currentBoundarySolutionKey = useMemo(() => JSON.stringify({
     fidelity,
-    packages: sourceConfigs.map((source) => source.packageId),
+    packages: packages.map(({ id, sourcePath }) => ({ id, sourcePath })),
     frequency: frequenciesHz[frequencyIndex],
     sources: drivenSourceConfigs,
     rigidObjects,
+    rigidPaths: rigidMeshes.map(({ id, sourcePath }) => ({ id, sourcePath })),
+  }), [fidelity, packages, frequenciesHz, frequencyIndex, rigidObjects, rigidMeshes, drivenSourceConfigs]);
+  const currentSolveKey = useMemo(() => JSON.stringify({
+    boundary: currentBoundarySolutionKey,
     observation: observationAcousticKey,
-  }), [drivenSourceConfigs, fidelity, pkg?.id, frequenciesHz, frequencyIndex, rigidObjects, observationAcousticKey]);
-  const currentGeometryKey = useMemo(() => JSON.stringify({
-    fidelity,
-    packages: sourceConfigs.map((source) => source.packageId),
-    frequency: frequenciesHz[frequencyIndex],
-    sources: sourceConfigs.map(({ id, packageId, positionX, positionHeightM, positionZ, pitchDeg, yawDeg, rollDeg }) => ({ id, packageId, positionX, positionHeightM, positionZ, pitchDeg, yawDeg, rollDeg })),
-    rigidObjects,
-  }), [fidelity, pkg?.id, frequenciesHz, frequencyIndex, rigidObjects, sourceConfigs]);
+  }), [currentBoundarySolutionKey, observationAcousticKey]);
   const selectedSolvedField = fidelity === "pattern" ? null : solvedFields[fidelity];
   const field = selectedSolvedField?.key === currentSolveKey
     ? (activePlane ? selectedSolvedField.fields?.[activePlane.id] ?? patternField : patternField)
@@ -496,7 +495,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     setFrequencyIndex(nearestFrequencyIndex(next, 80));
     setFidelity("pattern");
     setSolvedFields(emptySolvedFieldCache());
-    setBoundaryGeometryKey(null);
+    setBoundarySolutionKey(null);
     setSolveRevision(0);
     setSolveState("idle");
     setLiveSolveEnabled(false);
@@ -614,7 +613,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     setFidelity(nextFidelity);
     setSelectedInstances(nextSources[0] ? [nextSources[0].id] : []);
     setSolvedFields(emptySolvedFieldCache());
-    setBoundaryGeometryKey(null);
+    setBoundarySolutionKey(null);
     setSolveRevision(0);
     setSolveState("idle");
     setSolveMessage("Ready to solve");
@@ -880,7 +879,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     const fidelityLabel = coupled ? "Level 3" : "Level 2";
     const generation = ++solveGeneration.current;
     const requestedKey = currentSolveKey;
-    const requestedGeometryKey = currentGeometryKey;
+    const requestedBoundarySolutionKey = currentBoundarySolutionKey;
     setSolveState("solving");
     setSolveMessage("Starting BEAT CUDA worker");
     setError(null);
@@ -897,12 +896,12 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     }
     try {
       const rendererRequestStarted = performance.now();
-      let boundaryReady = boundaryGeometryKey === requestedGeometryKey;
+      let boundaryReady = boundarySolutionKey === requestedBoundarySolutionKey;
       const nextFields: Record<string, FieldFrame> = {};
       for (const plane of audiencePlanes) {
         if (generation !== solveGeneration.current) return;
         if (!patternFields[plane.id].validMask.some(value => value !== 0)) { nextFields[plane.id] = patternFields[plane.id]; continue; }
-        const reuseBoundary = !coupled && boundaryReady;
+        const reuseBoundary = boundaryReady;
         const request: DesktopLevel2SolveRequest = {
           packagePath: level2Package.sourcePath,
           packagePaths: solvePackagePaths,
@@ -916,7 +915,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
             scaleToMeters: rigidMeshById.get(object.assetId)?.scaleToMeters ?? 0.001,
           })),
           observation: plane,
-          solutionKey: requestedGeometryKey,
+          solutionKey: requestedBoundarySolutionKey,
           reuseBoundary,
           includeComplexPressure: true,
         };
@@ -925,7 +924,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
           result = await window.boundaryLabDesktop.solveLevel2(request);
         } catch (reuseError) {
           if (!reuseBoundary) throw reuseError;
-          setBoundaryGeometryKey(null);
+          setBoundarySolutionKey(null);
           result = await window.boundaryLabDesktop.solveLevel2({ ...request, reuseBoundary: false });
         }
         if (generation !== solveGeneration.current) return;
@@ -956,7 +955,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
         ...current,
         [coupled ? "coupled" : "boundary"]: { key: requestedKey, field: nextFields[audiencePlanes[0].id], fields: nextFields },
       }));
-      if (!coupled) setBoundaryGeometryKey(requestedGeometryKey);
+      setBoundarySolutionKey(requestedBoundarySolutionKey);
       setSolveRevision((revision) => revision + 1);
       setSolveState("complete");
       setSolveMessage(`Live ${fidelityLabel} field current`);
@@ -967,7 +966,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
       setSolveMessage(`${fidelityLabel} solve failed`);
       setError(caught instanceof Error ? caught.message : String(caught));
     }
-  }, [solvePackagePaths, boundaryGeometryKey, currentGeometryKey, currentSolveKey, drivenSourceConfigs, fidelity, frequencyIndex, level2Package, audiencePlanes, patternFields, patternField, frequenciesHz, rigidMeshById, rigidObjects]);
+  }, [solvePackagePaths, boundarySolutionKey, currentBoundarySolutionKey, currentSolveKey, drivenSourceConfigs, fidelity, frequencyIndex, level2Package, audiencePlanes, patternFields, patternField, frequenciesHz, rigidMeshById, rigidObjects]);
 
   const stopMicrophoneSweep = useCallback(async () => {
     if (!window.boundaryLabDesktop || microphoneSweepState !== "solving") return;
@@ -1684,7 +1683,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     setSolveState("idle");
     setSolveMessage("Scene restored; solve to update results");
     setSolvedFields(emptySolvedFieldCache());
-    setBoundaryGeometryKey(null);
+    setBoundarySolutionKey(null);
     setBemMicrophoneResponses(null); setDriverExcursion(null); setElectricalResponse(null); setAcousticResponse(null);
     setRawSweeps({}); setResponseHistory({}); setRetainedExcursion(null); setRetainedElectrical(null);
     if (microphoneSweepState === "solving") {
