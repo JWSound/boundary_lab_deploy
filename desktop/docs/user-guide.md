@@ -50,9 +50,9 @@ contains their placed instances, microphones, and the audience plane. Selecting
 an item exposes its properties. Positions and distances in Deploy are in metres;
 angles are in degrees. Scene Y is height, with the ground at Y = 0.
 
-- Add or duplicate cabinets to build the array; each instance has its own pose,
-  channel assignment, level, delay, and polarity. Ctrl+D duplicates selected
-  boundary objects.
+- Add cabinets or use **Ctrl+C / Ctrl+V** to copy and paste selected objects. Each
+  instance retains its pose, channel assignment, level, delay, and polarity.
+  Ctrl+D and the duplicate buttons have been removed.
 - Use **W** for translation and **E** for rotation. Rotation normally snaps in
   5° increments; hold Alt to rotate without snapping. Microphones translate but
   do not rotate.
@@ -226,3 +226,26 @@ close the application assuming a project save preserved them.
   Broad claims about maximum safe output require information outside these plots.
 
 For numerical assumptions and validation, continue to the [System Model](system-model.md).
+
+## Clipboard and history shortcuts
+
+Use **Ctrl+X**, **Ctrl+C**, and **Ctrl+V** to cut, copy, and paste single or mixed
+selections of speakers, rigid objects, and microphones. Paste creates fresh IDs,
+selects the new objects, and moves the whole group to a clear location while
+preserving relative positions. Cut removes objects only after copying succeeds.
+The audience plane is excluded from clipboard operations because the project has
+one plane; its property and transform edits can still be undone.
+
+**Ctrl+Z** undoes an edit; **Ctrl+Y** or **Ctrl+Shift+Z** redoes it. The Command key
+is also accepted on macOS. These commands are keyboard-only. Text and number
+inputs retain their normal editing shortcuts. Each drag, slider gesture, property
+editing session, or mixed-object paste is one history step. Camera movement and
+selection alone do not add history entries. New edits after undo clear redo.
+
+History retains up to 100 edits for this open project, sharing loaded assets rather
+than copying meshes or solver results. Opening a project resets history and starts
+a new clipboard session. Clipboard objects can be pasted only within the current
+project session, with their referenced packages, meshes, and channels still loaded.
+Desktop uses the system clipboard; the browser preview uses an in-app clipboard.
+Undo/redo pauses live solving, clears derived results, and discards late results
+from an earlier solve; use Solve field to refresh the restored scene.

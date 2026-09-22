@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, clipboard } = require("electron");
 const { resolveRuntime } = require("./runtime.cjs");
 const { DeployWorkerClient } = require("./workerClient.cjs");
 const { readFile, unlink, writeFile } = require("node:fs/promises");
@@ -160,11 +160,14 @@ function createWindow() {
               if (cards.length < 2 && Date.now() < deadline) return setTimeout(checkImported, 50);
               const sourcesAfterImport = document.querySelectorAll('.tree-button[data-object-id^="subwoofer-"]').length;
               cards[cards.length - 1]?.querySelector('button')?.click();
-              requestAnimationFrame(() => {
+              requestAnimationFrame(async () => {
                 const sourcesAfterAdd = document.querySelectorAll('.tree-button[data-object-id^="subwoofer-"]').length;
-                document.querySelector('button[aria-label="Duplicate selected boundary objects"]')?.click();
+                window.dispatchEvent(new KeyboardEvent('keydown', {key:'c',ctrlKey:true,bubbles:true}));
+                await new Promise(r=>setTimeout(r,150));
+                window.dispatchEvent(new KeyboardEvent('keydown', {key:'v',ctrlKey:true,bubbles:true}));
+                await new Promise(r=>setTimeout(r,250));
                 requestAnimationFrame(() => {
-                  const sourcesAfterDuplicate = document.querySelectorAll('.tree-button[data-object-id^="subwoofer-"]').length;
+                  const sourcesAfterPaste = document.querySelectorAll('.tree-button[data-object-id^="subwoofer-"]').length;
                   document.querySelector('button[aria-label="Remove selected objects"]')?.click();
                   requestAnimationFrame(() => {
                     document.querySelector('.tree-button[data-object-id="subwoofer-3"]')?.click();
@@ -175,7 +178,7 @@ function createWindow() {
                         sourcesBefore,
                         sourcesAfterImport,
                         sourcesAfterAdd,
-                        sourcesAfterDuplicate,
+                        sourcesAfterPaste,
                         sourcesAfterCleanup: document.querySelectorAll('.tree-button[data-object-id^="subwoofer-"]').length
                       }));
                     });
@@ -220,11 +223,14 @@ function createWindow() {
                   const translateMode = viewport?.getAttribute('data-transform-mode');
                   const grabPointCount = viewport?.getAttribute('data-grab-point-count');
                   window.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', bubbles: true }));
-                  requestAnimationFrame(() => {
+                  requestAnimationFrame(async () => {
                     const rotateMode = viewport?.getAttribute('data-transform-mode');
-                    document.querySelector('button[aria-label="Duplicate selected boundary objects"]')?.click();
+                    window.dispatchEvent(new KeyboardEvent('keydown', {key:'c',ctrlKey:true,bubbles:true}));
+                await new Promise(r=>setTimeout(r,150));
+                window.dispatchEvent(new KeyboardEvent('keydown', {key:'v',ctrlKey:true,bubbles:true}));
+                await new Promise(r=>setTimeout(r,250));
                     requestAnimationFrame(() => {
-                      const countAfterDuplicate = document.querySelectorAll('.tree-button[data-object-id^="rigid-"]').length;
+                      const countAfterPaste = document.querySelectorAll('.tree-button[data-object-id^="rigid-"]').length;
                       document.querySelector('button[aria-label="Remove selected objects"]')?.click();
                       requestAnimationFrame(() => {
                         const remaining = document.querySelector('.tree-button[data-object-id^="rigid-"]');
@@ -232,7 +238,7 @@ function createWindow() {
                         resolve({
                           error: error || null,
                           meshName: card?.querySelector('.package-name')?.textContent?.trim() || null,
-                          countAfterDuplicate,
+                          countAfterPaste,
                           countAfterCleanup: document.querySelectorAll('.tree-button[data-object-id^="rigid-"]').length,
                           translateMode,
                           rotateMode,
@@ -691,6 +697,19 @@ async function readPackageSelection(path) {
     bytes: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
   };
 }
+
+// Only text payloads are exposed, not unrestricted clipboard or Electron access.
+ipcMain.handle("deploy:read-scene-clipboard", () => {
+  const text = clipboard.readText();
+  if (text.length > 2_000_000) throw new Error("Clipboard selection is too large.");
+  return text;
+});
+ipcMain.handle("deploy:write-scene-clipboard", (_event, text) => {
+  if (typeof text !== "string" || text.length > 2_000_000) throw new Error("Invalid scene clipboard payload.");
+  const value = JSON.parse(text);
+  if (value?.schema !== "boundary-lab-deploy-selection" || value.version !== 1) throw new Error("Invalid scene clipboard format.");
+  clipboard.writeText(text);
+});
 
 ipcMain.handle("deploy:load-bundled-example", async () => {
   const path = join(libraryRoot, "S218BP_LOD.blabsp");

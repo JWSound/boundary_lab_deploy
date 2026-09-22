@@ -70,6 +70,8 @@ interface DesktopMicrophoneSweepProgress {
 interface Window {
   boundaryLabDeployProfile?: Record<string, unknown>;
   boundaryLabDesktop?: {
+    readSceneClipboard: () => Promise<string>;
+    writeSceneClipboard: (text: string) => Promise<void>;
     loadBundledExample: () => Promise<DesktopPackageSelection | null>;
     openProject: () => Promise<DesktopProjectSelection | null>;
     openSpeakerPackage: () => Promise<DesktopPackageSelection | null>;
