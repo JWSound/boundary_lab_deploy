@@ -33,3 +33,5 @@ jobs:
         working-directory: desktop
       - run: npm run test:runtime
         working-directory: desktop
+      - run: npm run test:viewport-rendering
+        working-directory: desktop
