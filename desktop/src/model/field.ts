@@ -515,9 +515,27 @@ export function computeMixedFieldFrame(
       for (const datum of sourceData) {
         for (const receiverSign of GROUND_RECEIVER_SIGNS) {
           const distance = patternRay(direction, datum.source, datum.inverseRotation, worldX, worldY, worldZ, receiverSign);
-          const [sampleReal, sampleImag, referenceRadius] = lookupPattern(datum.lookup, direction.x, direction.z, -direction.y);
+          // Keep lookup and propagation scalar in this hot loop to avoid per-ray tuples.
+          // Match lookupPattern and propagatePattern, including the exp(+iwt) convention.
+          const lookup = datum.lookup;
+          const elevation = Math.asin(Math.max(-1, Math.min(1, -direction.y)));
+          const azimuth = Math.atan2(direction.x, direction.z);
+          const azimuthIndex = Math.round(((azimuth + Math.PI) / (2 * Math.PI)) * lookup.azimuthBins) % lookup.azimuthBins;
+          const elevationIndex = Math.max(
+            0,
+            Math.min(lookup.elevationBins - 1, Math.round(((elevation + Math.PI / 2) / Math.PI) * (lookup.elevationBins - 1))),
+          );
+          const sampleIndex = elevationIndex * lookup.azimuthBins + azimuthIndex;
+          const sampleReal = lookup.real[sampleIndex];
+          const sampleImag = lookup.imag[sampleIndex];
+          const referenceRadius = lookup.radius[sampleIndex];
           if (distance < referenceRadius) clippedNearFieldPoints += 1;
-          const [fieldReal, fieldImag] = propagatePattern(sampleReal, sampleImag, referenceRadius, distance, datum.wavenumber);
+          const scale = referenceRadius / distance;
+          const phase = -datum.wavenumber * (distance - referenceRadius);
+          const propagationReal = Math.cos(phase) * scale;
+          const propagationImag = Math.sin(phase) * scale;
+          const fieldReal = sampleReal * propagationReal - sampleImag * propagationImag;
+          const fieldImag = sampleReal * propagationImag + sampleImag * propagationReal;
           totalReal += fieldReal * datum.driveReal - fieldImag * datum.driveImag;
           totalImag += fieldReal * datum.driveImag + fieldImag * datum.driveReal;
         }
