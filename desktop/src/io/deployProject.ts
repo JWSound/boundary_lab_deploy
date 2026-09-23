@@ -1,3 +1,4 @@
+import { validatePlaneSampling } from "../model/planeSampling";
 import { parseEqualizer } from "../model/filters";
 import { planeScale, type PlaneScale } from "../model/planeScale";
 import { defaultObservation } from "../model/sceneState";
@@ -5,7 +6,7 @@ import { createDefaultChannel, DEFAULT_CHANNEL_ID, DEFAULT_SYSTEM_GAIN_DB } from
 import type { DeployChannel, EqualizerConfiguration, Fidelity, LoadedSpeakerPackage, MicrophoneConfiguration, ObservationPlane, AudiencePlane, RigidMeshAsset, RigidMeshConfiguration, SourceConfiguration } from "../model/types";
 
 export const DEPLOY_PROJECT_SCHEMA = "boundary-lab-deploy-project";
-export const DEPLOY_PROJECT_SCHEMA_VERSION = 10;
+export const DEPLOY_PROJECT_SCHEMA_VERSION = 11;
 
 export interface DeployPackageReference {
   id: string;
@@ -76,8 +77,8 @@ function positive(value: unknown, label: string): number {
 
 function gridSize(value: unknown, label: string): number {
   const result = finite(value, label);
-  if (!Number.isInteger(result) || result < 2 || result > 200) {
-    throw new Error(`${label} must be an integer between 2 and 200.`);
+  if (!Number.isSafeInteger(result) || result < 2) {
+    throw new Error(`${label} must be an integer of at least 2.`);
   }
   return result;
 }
@@ -180,7 +181,8 @@ function observationPlane(value: unknown, legacyVersion = false): ObservationPla
   if (phaseAnimationSpeedHz < 0.1 || phaseAnimationSpeedHz > 4) {
     throw new Error("observation_plane.phaseAnimationSpeedHz must be between 0.1 and 4 Hz.");
   }
-  return {
+  const result: ObservationPlane = {
+    ...(plane.pointsPerMeter === undefined ? {} : { pointsPerMeter: finite(plane.pointsPerMeter, "observation_plane.pointsPerMeter") }),
     widthM: positive(plane.widthM, "observation_plane.widthM"),
     depthM: positive(plane.depthM, "observation_plane.depthM"),
     centerXM: finite(plane.centerXM, "observation_plane.centerXM"),
@@ -198,6 +200,8 @@ function observationPlane(value: unknown, legacyVersion = false): ObservationPla
     pressureScalePa,
     phaseAnimationSpeedHz,
   };
+  validatePlaneSampling(result);
+  return result;
 }
 
 export function parseDeployProject(contents: string): DeployProject {
@@ -210,7 +214,7 @@ export function parseDeployProject(contents: string): DeployProject {
   const project = record(raw, "Project");
   if (project.schema !== DEPLOY_PROJECT_SCHEMA) throw new Error("This is not a Boundary Lab Deploy project.");
   const version = finite(project.schema_version, "schema_version");
-  if (version !== 5 && version !== 6 && version !== 7 && version !== 8 && version !== 9 && version !== DEPLOY_PROJECT_SCHEMA_VERSION) {
+  if (version !== 5 && version !== 6 && version !== 7 && version !== 8 && version !== 9 && version !== 10 && version !== DEPLOY_PROJECT_SCHEMA_VERSION) {
     throw new Error(`Unsupported Boundary Lab Deploy project schema version ${version}.`);
   }
   if (typeof project.name !== "string" || project.name.trim().length === 0) {

@@ -701,3 +701,7 @@ input[type="range"]::-webkit-slider-thumb {
 .filter-bank-editor footer { justify-content: space-between; gap: 12px; font-size: 10px; color: var(--muted); }
 .filter-bank-editor footer .processing-button { flex-shrink: 0; }
 @media (max-width: 700px) { .filter-bank-editor { width: calc(100vw - 16px); max-height: calc(100vh - 16px); } .eq-editor-body { padding: 8px; } .eq-preview-caption { flex-direction: column; gap: 4px; } }
+
+.plane-sampling-note, .plane-sampling-error { font-size: 10px; line-height: 1.5; margin: 8px 0 0; }
+.plane-sampling-note { color: var(--muted); }
+.plane-sampling-error { color: var(--warning); }

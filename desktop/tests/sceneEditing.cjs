@@ -73,6 +73,19 @@ app.whenReady().then(async()=>{
     await click('button[aria-label="Remove selected objects"]');assert.equal((await save()).audience_planes.length,1);
     await key('z');assert.equal((await save()).audience_planes.length,2);
     assert.equal(await run('document.querySelectorAll(".solve-status em").length'),0);
+    assert.equal((await save()).heatmap_scale.heatmapMinimumDb,70);
+    assert.equal((await save()).heatmap_scale.heatmapMaximumDb,125);
+    assert.equal(await run(`document.querySelector('input[aria-label="Points per meter"]').min`),'0.5');
+    assert.equal(await run(`document.querySelector('input[aria-label="Points per meter"]').max`),'10');
+    await run(`(()=>{const input=document.querySelector('input[aria-label="Points per meter"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'10');input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+    await delay(100);
+    assert.equal((await save()).audience_planes[1].pointsPerMeter,10);
+    assert.equal((await save()).audience_planes[1].columns,241);
+    writeFileSync(join(dir,'plane-density.png'),(await win.capturePage()).toPNG());
+    await key('z');assert.equal((await save()).audience_planes[1].pointsPerMeter,2);
+    await key('y');assert.equal((await save()).audience_planes[1].pointsPerMeter,10);
+    await key('z');
+
     for (const [label,value] of [['Scale minimum',65],['Scale maximum',125],['Banding',7]]) {
       await run(`(()=>{const input=document.querySelector('input[aria-label="${label}"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'${value}');input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
       await delay(80);
@@ -84,6 +97,7 @@ app.whenReady().then(async()=>{
     await click('button[aria-label="Add audience plane"]');
     assert.equal((await save()).audience_planes.at(-1).heatmapBandingDb,7,'New planes inherit the shared scale');
     await key('z');await save();
+    await run('Object.assign(window.saved.audience_planes[0],{widthM:100,depthM:100,pointsPerMeter:2,columns:201,rows:201})');
     await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Projects').click()`);
     await wait('document.querySelector(".recent-project-link")');
     assert.equal(await run('document.querySelectorAll(".projects-heading p, .projects-section-title span").length'),0);
@@ -94,6 +108,12 @@ app.whenReady().then(async()=>{
     assert.equal(await run('window.openedPath'),'E:/Studies/test.blabdeploy.json');
     assert.equal((await save()).audience_planes.length,2,'Recent project restores every plane without speaker packages');
     assert.ok((await save()).audience_planes.every(p=>p.heatmapBandingDb===7),'Global scales survive reopening');
+    await run(`document.querySelector('.tree-button[data-object-id="audience-plane-1"]').click()`);await delay(80);
+    await run(`(()=>{const input=document.querySelector('input[aria-label="Points per meter"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'10');input.dispatchEvent(new Event('input',{bubbles:true}));})()`);await delay(80);
+    assert.ok(await run('document.querySelector(".plane-sampling-error").textContent.includes("250,000")'));
+    assert.equal((await save()).audience_planes[0].pointsPerMeter,2,'Over-limit setting preserves density');
+    assert.equal((await save()).audience_planes[0].columns,201,'Over-limit setting preserves grid');
+
     await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Projects').click()`);
     await wait('document.querySelector(".projects-screen")');
     // Use the generated browser example here; disk package parsing has separate coverage.
