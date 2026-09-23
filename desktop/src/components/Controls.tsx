@@ -1,7 +1,8 @@
+import { withPlaneDensity } from "../model/planeSampling";
 import type { LucideIcon } from "lucide-react";
 import { Box, CircleDot, Grid3X3, Mic2, Palette, Plus, Radio, Speaker, SlidersHorizontal, Trash2 } from "lucide-react";
 import type { ChangeEvent, MouseEvent, ReactNode } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type {
   LoadedSpeakerPackage,
   MicrophoneConfiguration,
@@ -374,13 +375,6 @@ export function ChannelsPanel({
   );
 }
 
-export function planeGridShape(widthM: number, depthM: number, majorSamples: number): [number, number] {
-  if (widthM >= depthM) {
-    return [majorSamples, Math.max(2, Math.round(((majorSamples - 1) * depthM) / widthM) + 1)];
-  }
-  return [Math.max(2, Math.round(((majorSamples - 1) * widthM) / depthM) + 1), majorSamples];
-}
-
 export function PlaneResolutionInspector({
   value,
   onChange,
@@ -392,13 +386,15 @@ export function PlaneResolutionInspector({
   phaseAnimationEnabled: boolean;
   onPhaseAnimationEnabledChange: (enabled: boolean) => void;
 }) {
-  const resolution = Math.max(value.columns, value.rows);
+  const [resolutionError, setResolutionError] = useState<string | null>(null);
+  useEffect(() => setResolutionError(null), [value.widthM, value.depthM, value.columns, value.rows, value.pointsPerMeter]);
+  const resolution = value.pointsPerMeter ?? Math.min(10, Math.max(0.5, (Math.max(value.columns, value.rows)-1)/Math.max(value.widthM, value.depthM)));
   const set = <K extends keyof ObservationPlane>(key: K, next: ObservationPlane[K]) => {
     onChange({ ...value, [key]: next });
   };
   const setResolution = (next: number) => {
-    const [columns, rows] = planeGridShape(value.widthM, value.depthM, next);
-    onChange({ ...value, columns, rows });
+    try { onChange(withPlaneDensity(value, next)); setResolutionError(null); }
+    catch (error) { setResolutionError(error instanceof Error ? error.message : String(error)); }
   };
   return (
     <>
@@ -439,19 +435,10 @@ export function PlaneResolutionInspector({
       </div>
       <SectionHeader icon={Grid3X3} title="Sampling" />
       <div className="inspector-section">
-        <label className="control-row plane-resolution-row">
-          <span>Resolution</span>
-          <input
-            aria-label="Plane resolution"
-            type="range"
-            min={12}
-            max={200}
-            step={2}
-            value={resolution}
-            onChange={(event) => setResolution(Number(event.target.value))}
-          />
-          <output>{value.columns} × {value.rows}</output>
-        </label>
+        <Slider label="Points per meter" value={resolution} minimum={0.5} maximum={10} step={0.1} unit=" pts/m" editable onChange={setResolution} />
+        <div className="plane-size-readout"><span>Sampling grid</span><output>{value.columns} × {value.rows} ({(value.columns * value.rows).toLocaleString()} points)</output></div>
+        {value.pointsPerMeter === undefined && <p className="plane-sampling-note">Legacy grid preserved. Adjust points/m to use density-based sampling.</p>}
+        {resolutionError && <p className="plane-sampling-error" role="alert">{resolutionError}</p>}
       </div>
       {value.displayMode === "spl" ? <>
         <SectionHeader icon={Palette} title="Heatmap (all planes)" />

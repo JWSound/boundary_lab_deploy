@@ -1,3 +1,4 @@
+import { resizedPlaneGrid, validatePlaneSampling } from "./model/planeSampling";
 import { FilterBankEditor } from "./components/FilterBankEditor";
 import { planeScale } from "./model/planeScale";
 import { FidelitySwitcher } from "./components/FidelitySwitcher";
@@ -36,7 +37,6 @@ import {
   ChannelsPanel,
   MicrophoneInspector,
   PackageCard,
-  planeGridShape,
   PlaneResolutionInspector,
   SceneTree,
   SectionHeader,
@@ -90,6 +90,9 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     const current = scene.audiencePlanes.find(p => p.id === activePlane?.id);
     if (!current) return;
     const next = typeof value === "function" ? value(current) : value;
+    if (next === current) return;
+    try { validatePlaneSampling(next); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); return; }
     const scale = planeScale(next);
     editor.update({ ...scene, heatmapScale: scale, audiencePlanes: scene.audiencePlanes.map(p => ({
       ...(p.id === current.id ? { ...next, id: p.id, name: p.name } : p), ...scale,
@@ -1503,8 +1506,9 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
 
   const resizeObservation = (resize: ObservationResizeUpdate) => {
     setObservation((current) => {
-      const resolution = Math.max(current.columns, current.rows);
-      const [columns, rows] = planeGridShape(resize.widthM, resize.depthM, resolution);
+      let columns: number, rows: number;
+      try { [columns, rows] = resizedPlaneGrid(current, resize.widthM, resize.depthM); }
+      catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); return current; }
       return {
         ...current,
         widthM: resize.widthM,
@@ -2088,7 +2092,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
               <div><small>{selectedInstances.length > 1 ? `${selectedInstances.length} OBJECTS SELECTED` : "SELECTED OBJECT"}</small><strong>{activePlane?.name}</strong></div>
               <button className="icon-button quiet"><SlidersHorizontal size={15} /></button>
             </div>
-            <PlaneResolutionInspector
+            <PlaneResolutionInspector key={activePlane?.id}
               value={observation}
               onChange={setObservation}
               phaseAnimationEnabled={phaseAnimationEnabled}

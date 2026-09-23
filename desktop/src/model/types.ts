@@ -156,6 +156,8 @@ export interface MicrophoneResponseSet {
 }
 
 export interface ObservationPlane {
+  /** Absent in legacy projects: preserve their explicit grid until resolution is edited. */
+  pointsPerMeter?: number;
   widthM: number;
   depthM: number;
   centerXM: number;

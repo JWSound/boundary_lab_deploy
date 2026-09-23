@@ -711,3 +711,12 @@ def test_prepare_deploy_solve_request_emits_ground_image_close_pairs(tmp_path: P
     assert ground_pairs
     assert {order for _, _, order in ground_pairs}.issubset({4, 6, 8})
     assert 6 in {order for _, _, order in ground_pairs}
+
+
+def test_observation_plane_point_ceiling_keeps_large_valid_grids():
+    from boundary_deploy.solve import DeployObservationPlane
+    raw = {"widthM": 49.9, "depthM": 49.9, "columns": 500, "rows": 500}
+    plane = DeployObservationPlane.from_payload(raw)
+    assert plane.columns * plane.rows == 250_000
+    with pytest.raises(ValueError, match="250,000"):
+        DeployObservationPlane.from_payload({**raw, "columns": 501})
