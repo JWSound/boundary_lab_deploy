@@ -1,5 +1,6 @@
 const { appendFileSync, existsSync, statSync, renameSync, rmSync } = require("node:fs");
-const { spawn } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
+const { join } = require("node:path");
 const { performance } = require("node:perf_hooks");
 
 class DeployWorkerClient {
@@ -211,7 +212,16 @@ class DeployWorkerClient {
   }
 
   close() {
-    if (this.process && !this.process.killed) this.process.kill();
+    if (this.process && !this.process.killed) {
+      // Windows SIGTERM kills Python without running its Julia cleanup. Kill the
+      // tree while its parent is still alive, including an in-flight CUDA probe.
+      if (process.platform === "win32") {
+        const result = spawnSync(join(process.env.SystemRoot || "C:\\Windows", "System32", "taskkill.exe"),
+          ["/PID", String(this.process.pid), "/T", "/F"], { windowsHide: true, timeout: 10000 });
+        if (result.error) console.error("Deploy worker tree cleanup failed", result.error);
+      }
+      this.process.kill();
+    }
     this.process = null;
   }
 }
