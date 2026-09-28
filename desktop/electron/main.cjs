@@ -1,6 +1,7 @@
 const { app, BrowserWindow, dialog, ipcMain, clipboard } = require("electron");
 const { resolveRuntime } = require("./runtime.cjs");
 const { RecentProjects } = require("./recentProjects.cjs");
+const { SolverPreferences } = require("./solverPreferences.cjs");
 const { DeployWorkerClient } = require("./workerClient.cjs");
 const { readFile, unlink, writeFile } = require("node:fs/promises");
 const { basename, dirname, isAbsolute, join, resolve } = require("node:path");
@@ -18,6 +19,11 @@ const deployWorker = new DeployWorkerClient(() => resolveRuntime({
   packaged: app.isPackaged, resourcesPath: process.resourcesPath,
   dataPath: app.getPath("userData"), repositoryRoot,
 }));
+
+const solverPreferences = new SolverPreferences(join(app.getPath("userData"), "solver-preferences.json"),
+  async () => (await deployWorker.solve({}, null, "backend", "detect_backend")).backend);
+ipcMain.handle("deploy:get-solver-backend", () => solverPreferences.get());
+ipcMain.handle("deploy:set-solver-backend", (_event, backend) => solverPreferences.set(backend));
 
 function createWindow() {
   const level2Smoke = process.argv.includes("--smoke-level2");
@@ -865,7 +871,7 @@ ipcMain.handle("deploy:cancel-microphone-sweep", async () => deployWorker.cancel
 
 app.whenReady().then(() => {
   createWindow();
-  if (!packagedSmoke) void deployWorker.warmup().catch((error) => console.error("Deploy worker warmup failed", error));
+  if (!packagedSmoke) void solverPreferences.get().then(backend => deployWorker.warmup(backend)).catch((error) => console.error("Deploy worker warmup failed", error));
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

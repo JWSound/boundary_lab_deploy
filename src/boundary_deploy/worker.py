@@ -13,6 +13,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from beat_engine import engine_paths
+
 from boundary_deploy.acoustic_loading import ACOUSTIC_LOADING_KEYS, normalized_acoustic_loading
 from boundary_deploy.assets import DeploySolveCache
 from boundary_deploy.engine_runtime import (
@@ -66,6 +68,25 @@ def _worker(backend: str) -> BeatEngineWorkerProcess:
         julia_threads=os.environ.get("DEPLOY_JULIA_THREADS", os.environ.get("BLAB_JULIA_THREADS", "auto")),
         julia_project=project,
     )
+
+
+def detect_solver_backend() -> str:
+    """Probe the engine's CUDA handshake, not just the presence of a GPU driver."""
+    probe = BeatEngineWorkerProcess(
+        julia_executable=os.environ.get("DEPLOY_JULIA_EXE", os.environ.get("BLAB_JULIA_EXE", "julia")),
+        solver_script=engine_paths("cuda").system_solver,
+        julia_threads="2",
+        julia_project=DEFAULT_BEAT_ENGINE_CUDA_PROJECT,
+    )
+    try:
+        probe.ensure_started()
+        info = probe.worker_info or {}
+        return "cuda" if info.get("backends", {}).get("cuda", {}).get("available") is True else "cpu"
+    except Exception as exc:
+        print(f"CUDA availability check failed; using CPU: {exc}", file=sys.stderr)
+        return "cpu"
+    finally:
+        probe.terminate()
 
 
 def _worker_key(payload: object) -> str:
@@ -617,6 +638,10 @@ def main() -> int:
                                 if worker is not None:
                                     worker.terminate()
                         _emit("completed", request_id=request_id, cancelled=bool(matches))
+                        continue
+                    if operation == "detect_backend":
+                        _emit("result", request_id=request_id, result={"backend": detect_solver_backend()})
+                        _emit("completed", request_id=request_id)
                         continue
                     if operation == "warmup":
                         backend = str(message.get("backend", "cuda")).strip().lower()

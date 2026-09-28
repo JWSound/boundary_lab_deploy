@@ -374,3 +374,33 @@ def test_completion_follows_cleanup_and_accepts_immediate_next_job(monkeypatch):
     events = [json.loads(line) for line in output.getvalue().splitlines()]
     assert [event["id"] for event in events if event["type"] == "completed"] == [1, 2]
     assert not any(event["type"] == "failed" for event in events)
+
+
+@pytest.mark.parametrize("available, expected", [(True, "cuda"), (False, "cpu"), (None, "cpu")])
+def test_detect_backend_uses_engine_availability(monkeypatch, available, expected):
+    calls = []
+    class Probe:
+        worker_info = {"backends": {"cuda": {"available": available}}}
+        def __init__(self, **kwargs):
+            assert kwargs["solver_script"].name == "coupled_solver.jl"
+        def ensure_started(self):
+            calls.append("start")
+        def terminate(self):
+            calls.append("stop")
+    monkeypatch.setattr(deploy_worker, "BeatEngineWorkerProcess", Probe)
+    assert deploy_worker.detect_solver_backend() == expected
+    assert calls == ["start", "stop"]
+
+
+def test_detect_backend_falls_back_and_cleans_up_on_failure(monkeypatch):
+    stopped = []
+    class Probe:
+        def __init__(self, **kwargs):
+            pass
+        def ensure_started(self):
+            raise RuntimeError("No CUDA driver")
+        def terminate(self):
+            stopped.append(True)
+    monkeypatch.setattr(deploy_worker, "BeatEngineWorkerProcess", Probe)
+    assert deploy_worker.detect_solver_backend() == "cpu"
+    assert stopped == [True]

@@ -720,3 +720,21 @@ def test_observation_plane_point_ceiling_keeps_large_valid_grids():
     assert plane.columns * plane.rows == 250_000
     with pytest.raises(ValueError, match="250,000"):
         DeployObservationPlane.from_payload({**raw, "columns": 501})
+
+
+@pytest.mark.parametrize("backend, assembly", [("cpu", "operator_matrices"), ("cuda", "direct_system")])
+@pytest.mark.parametrize("mixed", [False, True])
+def test_rom_requests_select_backend_assembly(tmp_path, backend, assembly, mixed):
+    payload = _payload()
+    payload["backend"] = backend
+    payload["fidelity"] = "coupled"
+    if mixed:
+        payload["packagePaths"] = {"a": str(PACKAGE_PATH), "b": str(PACKAGE_PATH)}
+        payload.pop("packagePath")
+        for source, package_id in zip(payload["sources"], ("a", "b")):
+            source["packageId"] = package_id
+    _, request = prepare_deploy_rom_request(payload, tmp_path)
+    assert request["beat_engine_backend"] == backend
+    assert request["burton_miller_assembly"] == assembly
+    assert request["schema"] == "boundary_lab_deploy_rom"
+    assert ("observation_points_m" in request) == (backend == "cpu")

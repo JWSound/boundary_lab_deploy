@@ -1367,7 +1367,7 @@ def _prepare_scene_rom(
     }
     geometry.update(
         schema="boundary_lab_deploy_rom", schema_version=3,
-        burton_miller_assembly="direct_system",
+        burton_miller_assembly="direct_system" if geometry["beat_engine_backend"] == "cuda" else "operator_matrices",
         transducers=sorted(transducers, key=lambda t: order[t["source_id"]]),
         speakers=sorted(speakers, key=lambda s: order[s["id"]]),
     )
@@ -1555,7 +1555,7 @@ def _prepare_single_rom_request(
     request.update(
         schema="boundary_lab_deploy_rom",
         schema_version=1,
-        burton_miller_assembly="direct_system",
+        burton_miller_assembly="direct_system" if request["beat_engine_backend"] == "cuda" else "operator_matrices",
         boundary_neumann={"real": zeros_faces, "imag": zeros_faces},
         reference_boundary_pressure={"real": zeros_nodes, "imag": zeros_nodes},
         reference_boundary_pressure_mask=np.zeros(node_count, dtype=np.uint8).tolist(),
