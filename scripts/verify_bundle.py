@@ -20,6 +20,8 @@ def main():
     parser.add_argument("--resources", type=Path, default=ROOT / "build/resources")
     parser.add_argument("--destination", type=Path, default=ROOT / "build/Relocated Deploy/resources")
     parser.add_argument("--solve", action="store_true")
+    parser.add_argument("--qualify-backends", action="store_true",
+                        help="Qualify CPU and CUDA solves, cached fields, and sweeps offline")
     parser.add_argument("--in-place", action="store_true", help="Verify an already relocated/installed resource directory")
     args = parser.parse_args()
     destination = args.resources.resolve() if args.in_place else args.destination.resolve()
@@ -60,6 +62,11 @@ def main():
     if args.solve:
         subprocess.run([python, "-I", "-B", "-X", "utf8", ROOT / "scripts/smoke_solver.py", "--library", destination / "library",
                         "--output", user / ("solve-" + uuid.uuid4().hex[:8])], env=environment, cwd=user, check=True, timeout=900)
+    if args.qualify_backends:
+        subprocess.run([python, "-I", "-B", "-X", "utf8", ROOT / "scripts/check_solver_backends.py",
+                        "--library", destination / "library", "--backend", "both",
+                        "--output", user / ("backends-" + uuid.uuid4().hex[:8])],
+                       env=environment, cwd=user, check=True, timeout=1800)
     for name, expected in expected_files.items():
         with (destination / name).open("rb") as stream:
             actual = hashlib.file_digest(stream, "sha256").hexdigest()
@@ -68,7 +75,7 @@ def main():
     unexpected = {str(p.relative_to(destination)).replace("\\", "/") for p in destination.rglob("*") if p.is_file()} - set(expected_files) - {"runtime-manifest.json"}
     if unexpected:
         raise RuntimeError(f"Runtime created files in its installation: {sorted(unexpected)[:10]}")
-    report = {"worker_ready": True, "solve": args.solve, "resources_unchanged": True,
+    report = {"worker_ready": True, "solve": args.solve, "qualified_backends": args.qualify_backends, "resources_unchanged": True,
               "destination": str(destination), "runtime_id": manifest["runtime_id"]}
     (user / "verification.json").write_text(json.dumps(report, indent=2))
     print(json.dumps(report, indent=2))

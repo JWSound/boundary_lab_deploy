@@ -22,12 +22,13 @@ from boundary_deploy.worker import _worker
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--library", type=Path, default=Path(__file__).resolve().parents[1] / "desktop/library")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--backend", choices=("cpu", "cuda", "both"), default="both")
     args = parser.parse_args()
     args.output = args.output.resolve()
     args.output.mkdir(parents=True, exist_ok=False)
-    package = Path(__file__).resolve().parents[1] / "desktop/library/S218BP_LOD.blabsp"
+    package = args.library.resolve() / "S218BP_LOD.blabsp"
     payload = {
         "packagePath": str(package),
         "includeComplexPressure": True,

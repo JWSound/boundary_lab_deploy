@@ -8,7 +8,7 @@ The CPU coupled path uses the exported parity Petrov-Galerkin speaker ROM, the C
 
 ## Development and release dependency
 
-This feature requires the companion BEAT Engine `feat/deploy-cpu` implementation for CPU Coupled solving. BEAT 0.2.0 supports CPU Boundary solving but rejects CPU parity-ROM solves. The development environment can use an editable checkout of the companion engine.
+This feature requires BEAT Engine 0.3.0 for CPU Coupled solving. BEAT 0.2.0 supports CPU Boundary solving but rejects CPU parity-ROM solves. The development environment can use an editable checkout of the companion engine.
 
 Before releasing this Deploy feature, publish and qualify a new BEAT wheel, then update **both** `pyproject.toml` and `packaging/runtime-lock.json` with its immutable URL and SHA-256. Do not repoint the existing 0.2.0 release. Boundary Lab's independent engine pin does not need to change.
 
@@ -25,3 +25,15 @@ python scripts/smoke_solver.py --backend cuda --output runs/mixed-cuda
 The first command runs Boundary and Coupled solves, cached field evaluation, and two-frequency sweeps, checks CPU/CUDA complex-pressure agreement within a relative norm tolerance of 0.0005, and checks coupled convergence and sweep warm starts. It writes request/result artifacts under the requested new directory. The mixed smoke commands use two different speaker packages.
 
 Also run Python tests, the desktop build, `npm run test:runtime`, and `npm run test:editing-ui`. Engine changes require the Julia reference gate and CPU GMRES tests. Qualify the final installer on a machine without NVIDIA hardware before publishing; development CPU tests and a CUDA-hidden availability probe do not replace installed-runtime qualification.
+
+To qualify relocated or installed resources using bundled Python and Julia with
+network access disabled:
+
+```powershell
+python scripts/verify_bundle.py --resources build/resources --solve --qualify-backends
+```
+
+For an existing installation, pass its resources directory and `--in-place`.
+`--solve` covers mixed speaker packages; `--qualify-backends` exercises both
+backends, both fidelities, cached fields, and warm-start sweeps. Verification also
+checks that no installed resource changed during execution.
