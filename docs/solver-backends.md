@@ -37,3 +37,8 @@ For an existing installation, pass its resources directory and `--in-place`.
 `--solve` covers mixed speaker packages; `--qualify-backends` exercises both
 backends, both fidelities, cached fields, and warm-start sweeps. Verification also
 checks that no installed resource changed during execution.
+
+After building the installer, `./scripts/test_installer.ps1 -QualifyBackends`
+installs it into a guarded temporary directory, verifies app launch and offline
+CPU/CUDA numerical execution, then uninstalls that test copy. It refuses to
+replace an existing Deploy installation.
