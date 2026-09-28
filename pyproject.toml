@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = {file = "LICENSE"}
 dependencies = [
-  "beat-engine @ https://github.com/JWSound/BEAT_Engine/releases/download/v0.2.0/beat_engine-0.2.0-py3-none-any.whl#sha256=bccad47b9647e5f4f7bc1ca6ac9d22e2e7751f1f39046fadc1e5e9782a282ad1",
+  "beat-engine @ https://github.com/JWSound/BEAT_Engine/releases/download/v0.3.0/beat_engine-0.3.0-py3-none-any.whl#sha256=b1476287d893a208d14f6c5ef2292e7a831c78d903d72357a5a29a291016fdae",
   "numpy", "meshio",
 ]
 
