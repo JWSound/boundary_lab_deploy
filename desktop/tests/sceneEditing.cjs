@@ -17,7 +17,7 @@ app.whenReady().then(async()=>{
       import React from 'react'; import {createRoot} from 'react-dom/client';
       import {App} from './src/App'; import './src/styles.css';
       window.clipText=''; window.failWrite=false;
-      window.testDesktop={recentProjects:async()=>window.saved?[{path:'E:/Studies/test.blabdeploy.json',name:window.saved.name,modifiedAt:'2026-09-20T12:00:00Z',openedAt:'2026-09-22T12:00:00Z',available:true}]:[],rememberProject:async()=>{},
+      window.testDesktop={getSolverBackend:async()=>"cuda",setSolverBackend:async(backend)=>{window.savedBackend=backend;return backend;},recentProjects:async()=>window.saved?[{path:'E:/Studies/test.blabdeploy.json',name:window.saved.name,modifiedAt:'2026-09-20T12:00:00Z',openedAt:'2026-09-22T12:00:00Z',available:true}]:[],rememberProject:async()=>{},
         openProject:async(path)=>{window.openedPath=path;return {name:'test.blabdeploy.json',path,contents:JSON.stringify(window.saved),packages:[],rigidMeshes:[]};},loadBundledExample:async()=>null,onSolveStatus:()=>()=>{},onMicrophoneSweepProgress:()=>()=>{},
         solveLevel2:async(request)=>new Promise(resolve=>{(window.solveRequests ||= []).push(request);window.finishSolve=resolve;}),
         calculateMicrophoneSweep:async()=>new Promise(resolve=>{window.finishSweep=resolve;}),
@@ -49,6 +49,17 @@ app.whenReady().then(async()=>{
     assert.equal(await run('document.querySelectorAll("canvas").length'),0,'Launcher does not mount a viewport');
     await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='New').click()`);
     await wait('document.querySelector(".app-shell")');
+    await click('button[aria-label="Preferences"]');
+    await wait('document.querySelector("dialog[open]")');
+    assert.equal(await run('document.querySelector("#solver-backend").value'), 'cuda');
+    await run(`(()=>{const select=document.querySelector('#solver-backend');select.value='cpu';select.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+    await wait('window.savedBackend === "cpu"');
+    assert.equal(await run('document.querySelector("#solver-backend").value'), 'cpu');
+    await win.webContents.capturePage().then(image=>writeFileSync(join(dir,'solver-preferences.png'),image.toPNG()));
+    await click('dialog button');
+    await click('button[aria-label="Preferences"]');
+    assert.equal(await run('document.querySelector("#solver-backend").value'), 'cpu');
+    await click('dialog button');
     assert.equal((await save()).system_gain_db,32);
     assert.equal((await save()).channels[0].levelDb,-24);
     await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Scene').click()`);
@@ -259,8 +270,25 @@ app.whenReady().then(async()=>{
     await run(`window.finishSolve({columns:2,rows:2,spl_db:[90,90,90,90],sample_indices:[0,1,2,3],field_pressure:{real:[2,2,2,2],imag:[0,0,0,0]},timings:{}})`);
     await wait('window.planeFrames?.[1]?.spl === 90');
     assert.deepEqual(await run('window.planeFrames.map(p=>p.spl)'),[40,90],'Distinct solver fields are routed to the matching planes');
-    await click('button[aria-label="Add audience plane"]');
+    await run(`Array.from(document.querySelectorAll('.topbar button')).find(b=>b.textContent.includes('Pause solve')).click()`);
+    await click('button[aria-label="Preferences"]');
+    await run(`(()=>{const select=document.querySelector('#solver-backend');select.value='cuda';select.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+    await wait('window.savedBackend === "cuda"');
+    await click('dialog button');
+    await run(`Array.from(document.querySelectorAll('.topbar button')).find(b=>b.textContent.includes('Solve field')).click()`);
     await wait('window.solveRequests?.length === 3');
+    assert.equal(await run('window.solveRequests[2].backend'),'cuda');
+    assert.equal(await run('window.solveRequests[2].reuseBoundary'),false,'Backend switch invalidates cached CPU boundary');
+    await click('button[aria-label="Preferences"]');
+    assert.equal(await run('document.querySelector("#solver-backend").disabled'),true,'Do not switch during a solve');
+    await click('dialog button');
+    await run(`window.finishSolve({columns:2,rows:2,spl_db:[40,40,40,40],sample_indices:[0,1,2,3],field_pressure:{real:[1,1,1,1],imag:[0,0,0,0]},timings:{}})`);
+    await wait('window.solveRequests?.length === 4');
+    assert.equal(await run('window.solveRequests[3].reuseBoundary'),true);
+    await run(`window.finishSolve({columns:2,rows:2,spl_db:[90,90,90,90],sample_indices:[0,1,2,3],field_pressure:{real:[2,2,2,2],imag:[0,0,0,0]},timings:{}})`);
+    await wait('window.planeFrames?.[1]?.spl === 90');
+    await click('button[aria-label="Add audience plane"]');
+    await wait('window.solveRequests?.length === 5');
     const revision=await run(`document.querySelector('.solve-status').dataset.solveRevision`);
     await key('z');await key('y');
     await run(`window.finishSolve({columns:2,rows:2,spl_db:[80,80,80,80],sample_indices:[0,1,2,3],field_pressure:{real:[1,1,1,1],imag:[0,0,0,0]},timings:{}})`);
@@ -273,6 +301,7 @@ app.whenReady().then(async()=>{
     await delay(100);
     assert.ok(await run('window.cancelledSweeps>0'));
     assert.equal(await run(`document.querySelectorAll('.solve-error').length`),0);
+    assert.ok(await run('window.solveRequests.slice(0,2).every(request=>request.backend === "cpu") && window.solveRequests.slice(2).every(request=>request.backend === "cuda")'));
     assert.deepEqual(errors,[]);
     console.log('Projects and editing UI passed: blank startup, recent reopen, multiple planes and distinct fields, clipboard/history, late result rejection.');
     app.exit(0);

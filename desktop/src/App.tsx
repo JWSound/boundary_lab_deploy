@@ -1,3 +1,4 @@
+import { SolverPreferencesDialog } from "./components/SolverPreferencesDialog";
 import { resizedPlaneGrid, validatePlaneSampling } from "./model/planeSampling";
 import { FilterBankEditor } from "./components/FilterBankEditor";
 import { planeScale } from "./model/planeScale";
@@ -102,6 +103,26 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
   const clipboardPending = useRef(false);
   const browserClipboard = useRef("");
   const [error, setError] = useState<string | null>(null);
+  const [solverBackend, setSolverBackend] = useState<"cpu" | "cuda" | null>(null);
+  const [preferencesOpen, setPreferencesOpen] = useState(false);
+  const [preferencesSaving, setPreferencesSaving] = useState(false);
+  useEffect(() => {
+    let disposed = false;
+    if (!window.boundaryLabDesktop?.getSolverBackend) { setSolverBackend("cpu"); return; }
+    window.boundaryLabDesktop.getSolverBackend().then(backend => {
+      if (!disposed) setSolverBackend(backend);
+    }).catch(caught => { if (!disposed) setError(String(caught)); });
+    return () => { disposed = true; };
+  }, []);
+  const changeSolverBackend = async (backend: "cpu" | "cuda") => {
+    setPreferencesSaving(true);
+    try {
+      if (window.boundaryLabDesktop) await window.boundaryLabDesktop.setSolverBackend(backend);
+      setSolverBackend(backend);
+    } catch (caught) { setError(String(caught)); }
+    finally { setPreferencesSaving(false); }
+  };
+
   const [leftTab, setLeftTab] = useState<"library" | "scene" | "channels">("library");
   const [equalizerPopup, setEqualizerPopup] = useState<{ scope: "channel" | "speaker"; id: string } | null>(null);
   const equalizerTarget = equalizerPopup?.scope === "channel" ? channels.find(c => c.id === equalizerPopup.id)
@@ -332,23 +353,25 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     [drivenSourceConfigs, packageById, sources, microphones],
   );
   const microphoneSweepKey = useMemo(() => JSON.stringify({
+    backend: solverBackend,
     fidelity,
     packages: packages.map((item) => ({ id: item.id, sourcePath: item.sourcePath })),
     sources: drivenSourceConfigs,
     rigidObjects,
     microphones,
     frequencies: Array.from(microphonePatternResponses.frequenciesHz),
-  }), [drivenSourceConfigs, fidelity, microphonePatternResponses.frequenciesHz, microphones, packages, rigidObjects]);
+  }), [solverBackend, drivenSourceConfigs, fidelity, microphonePatternResponses.frequenciesHz, microphones, packages, rigidObjects]);
   // A solved boundary depends on the processed drives as well as geometry.
   // Observation planes are deliberately excluded so all planes share a solve.
   const currentBoundarySolutionKey = useMemo(() => JSON.stringify({
+    backend: solverBackend,
     fidelity,
     packages: packages.map(({ id, sourcePath }) => ({ id, sourcePath })),
     frequency: frequenciesHz[frequencyIndex],
     sources: drivenSourceConfigs,
     rigidObjects,
     rigidPaths: rigidMeshes.map(({ id, sourcePath }) => ({ id, sourcePath })),
-  }), [fidelity, packages, frequenciesHz, frequencyIndex, rigidObjects, rigidMeshes, drivenSourceConfigs]);
+  }), [solverBackend, fidelity, packages, frequenciesHz, frequencyIndex, rigidObjects, rigidMeshes, drivenSourceConfigs]);
   const currentSolveKey = useMemo(() => JSON.stringify({
     boundary: currentBoundarySolutionKey,
     observation: observationAcousticKey,
@@ -396,11 +419,11 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
       : !level2FrequencyAvailable
         ? "The selected frequency was not exported by the active Level 2 package."
         : !boundaryAvailable ? "Every speaker package must contain Level 2 data at the selected frequency." : undefined;
-  const selectedSolverAvailable = fidelity === "boundary"
+  const selectedSolverAvailable = solverBackend !== null && !preferencesSaving && (fidelity === "boundary"
     ? boundaryAvailable
     : fidelity === "coupled"
       ? coupledAvailable
-      : false;
+      : false);
   const analysisKeyFor = (method: Fidelity) => JSON.stringify({ ...JSON.parse(microphoneSweepKey), fidelity: method });
   const currentBoundaryResponses = responseHistory.boundary?.key === analysisKeyFor("boundary") ? responseHistory.boundary : null;
   const currentCoupledResponses = responseHistory.coupled?.key === analysisKeyFor("coupled") ? responseHistory.coupled : null;
@@ -649,8 +672,8 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
 
   useEffect(() => window.boundaryLabDesktop?.onSolveStatus((status) => {
     if (status.type === "status" && status.message) setSolveMessage(status.message);
-    if (status.type === "initialized") setSolveMessage("BEAT CUDA initialized");
-  }), []);
+    if (status.type === "initialized") setSolveMessage(`BEAT ${solverBackend?.toUpperCase()} initialized`);
+  }), [solverBackend]);
 
   useEffect(() => window.boundaryLabDesktop?.onMicrophoneSweepProgress((progress) => {
     if (microphoneSweepKeyRef.current === null) return;
@@ -883,7 +906,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
   };
 
   const solveLevel2 = useCallback(async () => {
-    if (!window.boundaryLabDesktop || !level2Package?.sourcePath) {
+    if (!solverBackend || preferencesSaving || !window.boundaryLabDesktop || !level2Package?.sourcePath) {
       setError("Solving requires disk-backed speaker packages.");
       return;
     }
@@ -893,7 +916,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     const requestedKey = currentSolveKey;
     const requestedBoundarySolutionKey = currentBoundarySolutionKey;
     setSolveState("solving");
-    setSolveMessage("Starting BEAT CUDA worker");
+    setSolveMessage(`Starting BEAT ${solverBackend?.toUpperCase()} worker`);
     setError(null);
     if (!audiencePlanes.length) { setLiveSolveEnabled(false); setSolveState("idle"); return; }
     if (!Object.values(patternFields).some(frame => frame.validMask.some(value => value !== 0))) {
@@ -918,7 +941,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
           packagePath: level2Package.sourcePath,
           packagePaths: solvePackagePaths,
           frequencyHz: frequenciesHz[frequencyIndex],
-          backend: "cuda",
+          backend: solverBackend ?? "cpu",
           fidelity: coupled ? "coupled" : "boundary",
           sources: drivenSourceConfigs,
           rigidObjects: rigidObjects.map((object) => ({
@@ -978,7 +1001,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
       setSolveMessage(`${fidelityLabel} solve failed`);
       setError(caught instanceof Error ? caught.message : String(caught));
     }
-  }, [solvePackagePaths, boundarySolutionKey, currentBoundarySolutionKey, currentSolveKey, drivenSourceConfigs, fidelity, frequencyIndex, level2Package, audiencePlanes, patternFields, patternField, frequenciesHz, rigidMeshById, rigidObjects]);
+  }, [preferencesSaving, solverBackend, solvePackagePaths, boundarySolutionKey, currentBoundarySolutionKey, currentSolveKey, drivenSourceConfigs, fidelity, frequencyIndex, level2Package, audiencePlanes, patternFields, patternField, frequenciesHz, rigidMeshById, rigidObjects]);
 
   const stopMicrophoneSweep = useCallback(async () => {
     if (!window.boundaryLabDesktop || microphoneSweepState !== "solving") return;
@@ -1029,7 +1052,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
       const result = await window.boundaryLabDesktop.calculateMicrophoneSweep({
         packagePath: level2Package.sourcePath,
         packagePaths: solvePackagePaths,
-        backend: "cuda",
+        backend: solverBackend ?? "cpu",
         fidelity: fidelity === "coupled" ? "coupled" : "boundary",
         sources: drivenSourceConfigs,
         rigidObjects: rigidObjects.map((object) => ({
@@ -1751,6 +1774,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
 
   useEffect(() => {
     const keyDown = (event: KeyboardEvent) => {
+      if (preferencesOpen) return;
       if (event.key === "Alt") setAngleSnapDisabled(true);
       const target = event.target;
       const transformableSelected = Boolean(selectedSource) || Boolean(selectedRigid) || Boolean(selectedMicrophone) || Boolean(activePlane && selectedInstance === activePlane.id);
@@ -1898,6 +1922,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
         </div>
         <div className="project-breadcrumb"><button className="text-button" onClick={() => { if (!projectEdited || window.confirm("Return to Projects and discard unsaved changes?")) onProjects(); }}>Projects</button><ChevronRight size={13} /><strong>{projectName}</strong>{projectEdited && <i>Edited</i>}</div>
         <FidelitySwitcher
+          backend={solverBackend}
           value={fidelity}
           onChange={setFidelity}
           packageLevel={scenePackageLevel}
@@ -1909,7 +1934,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
         <div className="topbar-actions">
           <button className="icon-button" title="Open project" aria-label="Open project" onClick={openProject}><FolderOpen size={17} /></button>
           <button className="icon-button" title="Save project" onClick={saveProject}><Save size={17} /></button>
-          <button className="icon-button" title="Settings"><Settings2 size={17} /></button>
+          <button className="icon-button" title="Preferences" aria-label="Preferences" onClick={() => setPreferencesOpen(true)}><Settings2 size={17} /></button>
           <button
             className={`primary-button ${liveSolveEnabled ? "live" : ""}`}
             disabled={fidelity === "pattern" || !selectedSolverAvailable || !audiencePlanes.length}
@@ -1919,6 +1944,9 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
           >{liveSolveEnabled ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />} {liveSolveEnabled ? "Pause solve" : "Solve field"}</button>
         </div>
       </header>
+      {preferencesOpen && <SolverPreferencesDialog backend={solverBackend}
+        busy={preferencesSaving || solveState === "solving" || microphoneSweepState === "solving"}
+        onChange={changeSolverBackend} onClose={() => setPreferencesOpen(false)} />}
 
       <aside className="left-panel panel">
         <div className="panel-tabs">
@@ -2070,7 +2098,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
           <span className={solveState === "solving" ? "live-dot solving" : "live-dot"} />
           <div>
             <strong>{fidelity !== "pattern" ? (boundaryCurrent ? `${fidelity === "coupled" ? "Coupled" : "Boundary"} solution` : `${fidelity === "coupled" ? "Coupled" : "Boundary"} preview`) : "Pattern preview"}</strong>
-            <small>{solveState === "solving" ? solveMessage : `${liveSolveEnabled ? "Live" : boundaryCurrent ? "BEAT CUDA" : "Current"} · ${formatFrequency(frequenciesHz[frequencyIndex])}${fidelity === "pattern" ? " · Rigid ground" : ""}`}</small>
+            <small>{solveState === "solving" ? solveMessage : `${liveSolveEnabled ? "Live" : boundaryCurrent ? `BEAT ${solverBackend?.toUpperCase()}` : "Current"} · ${formatFrequency(frequenciesHz[frequencyIndex])}${fidelity === "pattern" ? " · Rigid ground" : ""}`}</small>
           </div>
         </div>
         {activePlane && <div className="viewport-color-legend">

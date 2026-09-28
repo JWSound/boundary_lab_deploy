@@ -705,3 +705,11 @@ input[type="range"]::-webkit-slider-thumb {
 .plane-sampling-note, .plane-sampling-error { font-size: 10px; line-height: 1.5; margin: 8px 0 0; }
 .plane-sampling-note { color: var(--muted); }
 .plane-sampling-error { color: var(--warning); }
+
+.solver-preferences { width: 340px; padding: 20px; color: #e8e8e8; background: var(--classic-face); border: 1px solid var(--classic-highlight); }
+.solver-preferences::backdrop { background: rgba(0,0,0,.58); }
+.solver-preferences h2 { margin: 0 0 20px; font-size: 16px; }
+.solver-preferences label { display: block; margin-bottom: 8px; }
+.solver-preferences select { width: 100%; padding: 8px; color: inherit; background: var(--classic-window); border: 1px solid var(--classic-highlight); font: inherit; }
+.solver-preferences p { color: var(--muted-2); font-size: 12px; margin: 12px 0 20px; }
+.solver-preferences button { float: right; }

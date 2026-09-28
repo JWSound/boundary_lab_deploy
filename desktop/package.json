@@ -31,7 +31,7 @@
     "pack:win": "npm run build && electron-builder --config electron-builder.json --win --x64 --dir --config.forceCodeSigning=false --config.win.signAndEditExecutable=false",
     "dist:win": "npm run build && electron-builder --config electron-builder.json --win --x64",
     "dist:win:unsigned": "npm run build && electron-builder --config electron-builder.json --win --x64 --config.forceCodeSigning=false --config.win.signAndEditExecutable=false",
-    "test:runtime": "node --test tests/runtime.test.cjs"
+    "test:runtime": "node --test tests/runtime.test.cjs tests/solverPreferences.test.cjs"
   },
   "dependencies": {
     "@react-three/drei": "9.108.3",
