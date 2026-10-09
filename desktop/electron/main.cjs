@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, clipboard } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, clipboard, shell } = require("electron");
 const { resolveRuntime } = require("./runtime.cjs");
 const { RecentProjects } = require("./recentProjects.cjs");
 const { SolverPreferences } = require("./solverPreferences.cjs");
@@ -15,6 +15,27 @@ const here = __dirname;
 const repositoryRoot = join(here, "../..");
 
 const libraryRoot = app.isPackaged ? join(process.resourcesPath, "library") : join(here, "../library");
+const { AssetLibrary } = require("./assetLibrary.cjs");
+const assetLibrary = new AssetLibrary(
+  join(app.getPath("userData"), "asset-library.json"),
+  join(app.getPath("documents"), "Boundary Lab Deploy", "Library"), libraryRoot,
+  join(app.getPath("userData"), "asset-cache"),
+);
+ipcMain.handle("deploy:library-scan", () => assetLibrary.scan());
+ipcMain.handle("deploy:library-folder", async (_event, action) => {
+  if (action === "open") { const root = await assetLibrary.root(); const error = await shell.openPath(root); if (error) throw new Error(error); return assetLibrary.scan(); }
+  const result = await dialog.showOpenDialog({ title: "Choose asset library folder", properties: ["openDirectory", "createDirectory"] });
+  return result.canceled ? assetLibrary.scan() : assetLibrary.setRoot(result.filePaths[0]);
+});
+ipcMain.handle("deploy:library-read", (_event, path, fingerprint) => assetLibrary.read(path, fingerprint));
+ipcMain.handle("deploy:library-import", async (_event, paths) => {
+  if (!paths) {
+    const result = await dialog.showOpenDialog({ title: "Import assets to library", properties: ["openFile", "multiSelections"], filters: [{ name: "Deploy assets", extensions: ["blabsp", "msh"] }] });
+    paths = result.canceled ? [] : result.filePaths;
+  }
+  if (!Array.isArray(paths) || paths.some(p => typeof p !== "string")) throw new Error("Invalid asset paths.");
+  return assetLibrary.import(paths);
+});
 const deployWorker = new DeployWorkerClient(() => resolveRuntime({
   packaged: app.isPackaged, resourcesPath: process.resourcesPath,
   dataPath: app.getPath("userData"), repositoryRoot,
@@ -55,7 +76,7 @@ function createWindow() {
           const deadline = Date.now() + 30000;
           const check = () => {
             Array.from(document.querySelectorAll('.projects-screen button')).find(b => b.textContent === 'Open example')?.click();
-            const source = document.querySelector('.package-card')?.textContent || '';
+            const source = document.querySelector('.package-card[data-package-id^="package-"]')?.textContent || '';
             if (source.includes('S218BP')) return resolve({ title: document.title, canvas: Boolean(document.querySelector('canvas')), package: source });
             if (Date.now() > deadline) return reject(new Error('Bundled example did not load'));
             setTimeout(check, 100);
@@ -81,8 +102,8 @@ function createWindow() {
         const deadline = Date.now() + 10000;
         const check = () => {
           Array.from(document.querySelectorAll('.projects-screen button')).find(b => b.textContent === 'Open example')?.click();
-          const source = document.querySelector('.package-subtitle')?.textContent || '';
-          if (source.includes('S218BP_LOD.blabsp') || Date.now() >= deadline) resolve(source);
+          const source = document.querySelector('.package-card[data-package-id^="package-"] .package-name')?.textContent || '';
+          if (source.includes('S218BP') || Date.now() >= deadline) resolve(source);
           else setTimeout(check, 50);
         };
         check();
@@ -91,7 +112,7 @@ function createWindow() {
       let packageImportInteraction = null;
       let rigidMeshInteraction = null;
       if (!benchmarkLevel2 && !level2Smoke) {
-        const bundledPackageId = await window.webContents.executeJavaScript("document.querySelector('.package-card')?.dataset.packageId || ''");
+        const bundledPackageId = await window.webContents.executeJavaScript(`document.querySelector('.package-card[data-package-id^="package-"]')?.dataset.packageId || ''`);
         const smokeProjectPath = join(app.getPath("temp"), `boundary-lab-deploy-${process.pid}.blabdeploy.json`);
         // Fixture IDs are hashes of bytes; line endings can change across checkouts.
         let rigidHash = 2166136261;
@@ -162,43 +183,18 @@ function createWindow() {
           ? { canceled: false, filePaths: [alternatePackagePath] }
           : showOpenDialog.call(dialog, options);
         try {
-          packageImportInteraction = await window.webContents.executeJavaScript(`new Promise((resolve) => {
-            const sourcesBefore = document.querySelectorAll('.tree-button[data-object-id^="subwoofer-"]').length;
-            Array.from(document.querySelectorAll('.left-panel .text-button')).find(button => button.textContent === 'Import')?.click();
-            const deadline = Date.now() + 10000;
-            const checkImported = () => {
-              const cards = document.querySelectorAll('.package-card[data-package-id]');
-              if (cards.length < 2 && Date.now() < deadline) return setTimeout(checkImported, 50);
-              const sourcesAfterImport = document.querySelectorAll('.tree-button[data-object-id^="subwoofer-"]').length;
-              cards[cards.length - 1]?.querySelector('button')?.click();
-              requestAnimationFrame(async () => {
-                const sourcesAfterAdd = document.querySelectorAll('.tree-button[data-object-id^="subwoofer-"]').length;
-                window.dispatchEvent(new KeyboardEvent('keydown', {key:'c',ctrlKey:true,bubbles:true}));
-                await new Promise(r=>setTimeout(r,150));
-                window.dispatchEvent(new KeyboardEvent('keydown', {key:'v',ctrlKey:true,bubbles:true}));
-                await new Promise(r=>setTimeout(r,250));
-                requestAnimationFrame(() => {
-                  const sourcesAfterPaste = document.querySelectorAll('.tree-button[data-object-id^="subwoofer-"]').length;
-                  document.querySelector('button[aria-label="Remove selected objects"]')?.click();
-                  requestAnimationFrame(() => {
-                    document.querySelector('.tree-button[data-object-id="subwoofer-3"]')?.click();
-                    requestAnimationFrame(() => {
-                      document.querySelector('button[aria-label="Remove selected objects"]')?.click();
-                      requestAnimationFrame(() => resolve({
-                        packageCount: cards.length,
-                        sourcesBefore,
-                        sourcesAfterImport,
-                        sourcesAfterAdd,
-                        sourcesAfterPaste,
-                        sourcesAfterCleanup: document.querySelectorAll('.tree-button[data-object-id^="subwoofer-"]').length
-                      }));
-                    });
-                  });
-                });
-              });
-            };
-            checkImported();
-          })`);
+          packageImportInteraction = await window.webContents.executeJavaScript(`(async () => {
+            const count = () => document.querySelectorAll('.tree-button[data-object-id^="subwoofer-"]').length;
+            const sourcesBefore = count();
+            document.querySelector('.asset-row[data-package-id^="package-"] button[aria-label^="Add "]').click();
+            const deadline = Date.now() + 15000;
+            while (count() === sourcesBefore && Date.now() < deadline) await new Promise(r => setTimeout(r, 50));
+            const sourcesAfterAdd = count();
+            if (sourcesAfterAdd !== sourcesBefore + 1) throw new Error('Add speaker from Assets did not place an instance');
+            document.querySelector('button[aria-label="Remove selected objects"]').click();
+            await new Promise(r => requestAnimationFrame(r));
+            return { sourcesBefore, sourcesAfterAdd, sourcesAfterCleanup: count() };
+          })()`);
         } finally {
           dialog.showOpenDialog = showOpenDialog;
           await unlink(alternatePackagePath).catch(() => {});
@@ -216,15 +212,13 @@ function createWindow() {
           : showOpenDialog.call(dialog, options);
         try {
           rigidMeshInteraction = await window.webContents.executeJavaScript(`new Promise((resolve) => {
-            const header = Array.from(document.querySelectorAll('.section-header'))
-              .find((candidate) => candidate.textContent?.includes('Rigid mesh library'));
-            header?.querySelector('button')?.click();
+            Array.from(document.querySelectorAll('.asset-type-tabs button')).find(b => b.textContent === 'Rigid meshes')?.click();
             const deadline = Date.now() + 10000;
             const checkImported = () => {
               const card = document.querySelector('.package-card[data-rigid-mesh-id]');
               const error = document.querySelector('.error-toast span')?.textContent || '';
               if (!card && !error && Date.now() < deadline) return setTimeout(checkImported, 50);
-              card?.querySelector('button')?.click();
+              card?.querySelector('button[aria-label^="Add "]')?.click();
               requestAnimationFrame(() => {
                 const first = document.querySelector('.tree-button[data-object-id^="rigid-"]');
                 first?.click();
@@ -268,6 +262,7 @@ function createWindow() {
         }
       }
       await window.webContents.executeJavaScript(`(() => {
+        Array.from(document.querySelectorAll('.asset-type-tabs button')).find(b => b.textContent === 'Speakers')?.click();
         document.querySelectorAll('.fidelity-switcher button')[1]?.click();
         return new Promise((resolve) => setTimeout(resolve, 0));
       })()`);
@@ -422,7 +417,7 @@ function createWindow() {
             .map((row) => row.getAttribute('data-object-id'));
           const selectedCountBeforeAdd = viewport?.getAttribute('data-selected-object-count');
           const sourceCountBeforeAdd = document.querySelectorAll('.tree-button[data-object-id^="subwoofer-"]').length;
-          document.querySelector('button[aria-label="Add speaker"]')?.click();
+          document.querySelector('.asset-row[data-package-id^="package-"] button[aria-label^="Add "]')?.click();
           requestAnimationFrame(() => {
             const sourceCountAfterAdd = document.querySelectorAll('.tree-button[data-object-id^="subwoofer-"]').length;
             const addedId = document.querySelector('.tree-button[aria-selected="true"]')?.getAttribute('data-object-id');
@@ -597,7 +592,7 @@ function createWindow() {
             requestAnimationFrame(() => {
               const sourceCountAfterRemoveAll = document.querySelectorAll('.tree-button[data-object-id^="subwoofer-"]').length;
               const solveStatusAfterRemoveAll = document.querySelector('.solve-status strong')?.textContent?.trim() || '';
-              const add = document.querySelector('button[aria-label="Add speaker"]');
+              const add = document.querySelector('.asset-row[data-package-id^="package-"] button[aria-label^="Add "]');
               add?.click();
               requestAnimationFrame(() => {
                 add?.click();
@@ -700,13 +695,8 @@ function createWindow() {
   }
 }
 
-async function readPackageSelection(path) {
-  const bytes = await readFile(path);
-  return {
-    name: path.split(/[\\/]/).pop() ?? "speaker.blabsp",
-    path,
-    bytes: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
-  };
+async function readPackageSelection(path, fingerprint) {
+  return assetLibrary.read(path, fingerprint);
 }
 
 // Only text payloads are exposed, not unrestricted clipboard or Electron access.
@@ -788,12 +778,14 @@ ipcMain.handle("deploy:open-project", async (_event, recentPath) => {
     const sourceFile = typeof reference?.source_file === "string" ? reference.source_file : null;
     const candidates = sourceFile ? [
       isAbsolute(sourceFile) ? sourceFile : resolve(dirname(projectPath), sourceFile),
+      ...(typeof reference.original_path === "string" ? [reference.original_path] : []),
       join(libraryRoot, basename(sourceFile)),
+      join(await assetLibrary.root(), basename(sourceFile)),
     ] : [];
     let packageResult = null;
     for (const candidate of [...new Set(candidates)]) {
       try {
-        packageResult = await readPackageSelection(candidate);
+        packageResult = await readPackageSelection(candidate, reference.fingerprint);
         break;
       } catch {
         // Try the next portable or bundled package location.
@@ -810,7 +802,7 @@ ipcMain.handle("deploy:open-project", async (_event, recentPath) => {
         properties: ["openFile"],
       });
       if (packageSelection.canceled || packageSelection.filePaths.length === 0) break;
-      packageResult = await readPackageSelection(packageSelection.filePaths[0]);
+      packageResult = await readPackageSelection(packageSelection.filePaths[0], reference.fingerprint);
     }
     packages.push(packageResult);
   }
@@ -820,12 +812,14 @@ ipcMain.handle("deploy:open-project", async (_event, recentPath) => {
     const sourceFile = typeof reference?.source_file === "string" ? reference.source_file : null;
     const candidates = sourceFile ? [
       isAbsolute(sourceFile) ? sourceFile : resolve(dirname(projectPath), sourceFile),
+      ...(typeof reference.original_path === "string" ? [reference.original_path] : []),
       join(libraryRoot, basename(sourceFile)),
+      join(await assetLibrary.root(), basename(sourceFile)),
     ] : [];
     let meshResult = null;
     for (const candidate of [...new Set(candidates)]) {
       try {
-        meshResult = await readPackageSelection(candidate);
+        meshResult = await readPackageSelection(candidate, reference.fingerprint);
         break;
       } catch {
         // Try the next portable or bundled mesh location.
@@ -842,7 +836,7 @@ ipcMain.handle("deploy:open-project", async (_event, recentPath) => {
         properties: ["openFile"],
       });
       if (meshSelection.canceled || meshSelection.filePaths.length === 0) break;
-      meshResult = await readPackageSelection(meshSelection.filePaths[0]);
+      meshResult = await readPackageSelection(meshSelection.filePaths[0], reference.fingerprint);
     }
     rigidMeshes.push(meshResult);
   }

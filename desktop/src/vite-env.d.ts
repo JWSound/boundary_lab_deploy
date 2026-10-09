@@ -4,7 +4,16 @@ interface DesktopPackageSelection {
   name: string;
   path: string;
   bytes: ArrayBuffer;
+  originalPath?: string;
+  fingerprint?: string;
 }
+
+interface LibraryEntry {
+  key: string; path: string; fileName: string; name: string;
+  kind: "speaker" | "rigid"; location: "library" | "builtin";
+  fingerprint: string; level?: number; error?: string;
+}
+interface LibrarySnapshot { root: string; entries: LibraryEntry[]; errors: string[] }
 
 interface RecentProject {
   path: string; name: string; openedAt: string; modifiedAt: string | null; available: boolean;
@@ -74,6 +83,11 @@ interface DesktopMicrophoneSweepProgress {
 interface Window {
   boundaryLabDeployProfile?: Record<string, unknown>;
   boundaryLabDesktop?: {
+    getDroppedFilePath: (file: File) => string;
+    scanLibrary: () => Promise<LibrarySnapshot>;
+    libraryFolder: (action: "open" | "choose") => Promise<LibrarySnapshot>;
+    readLibraryAsset: (path: string, fingerprint?: string) => Promise<DesktopPackageSelection>;
+    importLibraryAssets: (paths?: string[]) => Promise<{ snapshot: LibrarySnapshot; results: { path: string; destination?: string; error?: string }[] }>;
     getSolverBackend: () => Promise<"cpu" | "cuda" | "metal">;
     setSolverBackend: (backend: "cpu" | "cuda" | "metal") => Promise<"cpu" | "cuda" | "metal">;
     readSceneClipboard: () => Promise<string>;

@@ -65,3 +65,59 @@ The Apple-silicon unsigned DMG builder and installed CPU/Metal qualification are
 documented in [macOS packaging](macos.md#unsigned-apple-silicon-test-package).
 The separate `macOS unsigned candidate` workflow produces Actions test artifacts
 from tested main commits. It does not sign, notarize, or publish releases.
+
+## Scene navigation and local asset libraries
+
+The desktop workspace keeps the Scene/Channels pane above a persistent Assets
+browser. Drag the divider (or use its Up/Down keys) to resize the panes. Assets can
+be collapsed. Scene groups organize objects without changing their transforms;
+create a group from the selection, double-click a name to rename it, and drag
+objects onto a group to move them. Shift-click selects a range; Ctrl/Cmd-click
+adds or removes individual objects. The Actions menu offers duplication, framing,
+group moves, channel assignment, and deletion. Dedicated microphone and audience
+plane buttons sit above the outliner. Speaker and rigid-mesh imports are handled
+only in the Assets browser. Older visibility/lock flags are ignored when loading
+projects; all objects remain visible and selectable.
+
+The default desktop library is `Documents/Boundary Lab Deploy/Library`. Choose a
+different folder through Assets → Import → Choose library folder. While a project
+is open, Deploy rescans this folder and its subfolders every four seconds, caching
+unchanged metadata. `.blabsp` packages and Gmsh `.msh` assets appear alongside
+built-in examples and project assets. Search, location filters, favorites, and
+recently used sorting are available. Large catalogs render a window of rows.
+
+- **Import to library** or drop files onto Assets: copy files into the chosen
+  folder, preserving the originals and avoiding overwrite on filename collisions.
+- Use `+` on an asset or drag an asset row onto the viewport: add scene instances
+  using the existing collision-aware placement logic, not the mouse's world point.
+  External files must first be imported through Assets.
+- Select an asset row to inspect its details without changing scene frequency or
+  loading its full acoustic data. Use `+` to add an instance.
+
+Desktop assets are pinned to a SHA-256-addressed cache under the application's
+user-data directory. Solves and saved project references use this immutable copy.
+Replacing or deleting a watched file therefore does not silently alter an open
+project. A changed source is marked **Update**; its details offer **Apply to
+project**. The update preserves instance identity and is rejected if new geometry
+would violate boundary clearance. Undo restores the prior asset version. Copy to
+library is available for project assets. Invalid files produce per-file messages.
+
+Project schema 12 adds scene organization and optional asset origin/fingerprint
+metadata; schemas 5–11 still load. When moving projects to another computer, retain
+the source packages: the existing Locate dialog resolves missing cached assets and
+checks the saved fingerprint. Cancelling that dialog leaves the project unopened;
+placeholder objects for unresolved packages are not yet supported. Browser mode
+supports project-local file imports and drops, without a persistent folder catalog.
+
+Navigation checks:
+
+```bash
+cd desktop
+npm run test:navigation
+npm run test:navigation-ui
+npm run test:editing-ui
+```
+
+The Electron UI tests use isolated fixtures and record screenshots under
+`desktop/node_modules/.tmp`. On environments that set `ELECTRON_RUN_AS_NODE`, unset
+it when launching Electron tests.

@@ -2,6 +2,7 @@ import { Grid, Html, OrbitControls, TransformControls } from "@react-three/drei"
 import { Canvas, type ThreeEvent, useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import {
+  Box3,
   BufferAttribute,
   BufferGeometry,
   ClampToEdgeWrapping,
@@ -72,6 +73,7 @@ interface SceneBounds {
 }
 
 interface SceneViewProps {
+  frameRequest?: { ids: string[]; serial: number } | null;
   packages: LoadedSpeakerPackage[];
   rigidMeshes: RigidMeshAsset[];
   sources: SpeakerInstance[];
@@ -1519,6 +1521,33 @@ function AcousticScene(props: SceneViewProps) {
   // Request a frame after each scene commit, including child effects that reset
   // heatmap phase or reposition selection controls. This does not keep a loop alive.
   useEffect(() => { invalidate(); });
+  const camera = useThree(state => state.camera);
+  const controls = useThree(state => state.controls) as unknown as { target: Vector3; update: () => void } | undefined;
+  const lastFrame = useRef<number | null>(null);
+  useEffect(() => {
+    const request = props.frameRequest;
+    if (!request || !controls || lastFrame.current === request.serial) return;
+    lastFrame.current = request.serial;
+    const ids = new Set(request.ids), box = new Box3();
+    for (const object of [...props.sources, ...props.rigidObjects]) {
+      if (!ids.has(object.id)) continue;
+      const asset = [...props.packages, ...props.rigidMeshes].find(a => a.id === object.packageId);
+      const radius = Math.max(...(asset?.boundsM ?? [1])) / 2;
+      const center = new Vector3(...object.position);
+      box.expandByPoint(center.clone().addScalar(radius)); box.expandByPoint(center.clone().addScalar(-radius));
+    }
+    for (const mic of props.microphones) if (ids.has(mic.id)) box.expandByPoint(new Vector3(mic.positionX, mic.positionHeightM, mic.positionZ));
+    for (const { observation: p } of props.planes ?? []) if (ids.has(p.id)) {
+      box.expandByPoint(new Vector3(p.centerXM - p.widthM / 2, p.heightM, p.nearM));
+      box.expandByPoint(new Vector3(p.centerXM + p.widthM / 2, p.heightM, p.nearM + p.depthM));
+    }
+    if (box.isEmpty()) return;
+    const center = box.getCenter(new Vector3());
+    const distance = Math.max(4, box.getSize(new Vector3()).length() * 1.8);
+    const direction = camera.position.clone().sub(controls.target).normalize();
+    camera.position.copy(center).addScaledVector(direction, distance);
+    controls.target.copy(center); controls.update(); invalidate();
+  }, [props.frameRequest, controls, camera, invalidate, props.sources, props.rigidObjects, props.packages, props.rigidMeshes, props.microphones, props.planes]);
   const selectedInstances = new Set(props.selectedInstances);
   const boundaryAssets: BoundaryMeshAsset[] = [...props.packages, ...props.rigidMeshes];
   const allBoundaryObjects = [...props.sources, ...props.rigidObjects];

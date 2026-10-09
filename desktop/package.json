@@ -31,9 +31,11 @@
     "pack:win": "npm run build && electron-builder --config electron-builder.json --win --x64 --dir --config.forceCodeSigning=false --config.win.signAndEditExecutable=false",
     "dist:win": "npm run build && electron-builder --config electron-builder.json --win --x64",
     "dist:win:unsigned": "npm run build && electron-builder --config electron-builder.json --win --x64 --config.forceCodeSigning=false --config.win.signAndEditExecutable=false",
-    "test:runtime": "node --test tests/runtime.test.cjs tests/solverPreferences.test.cjs tests/workerShutdown.test.cjs",
+    "test:runtime": "node --test tests/runtime.test.cjs tests/solverPreferences.test.cjs tests/workerShutdown.test.cjs tests/workerErrors.test.cjs",
     "pack:mac": "npm run build && electron-builder --config electron-builder.mac.json --mac --arm64 --dir",
-    "dist:mac:unsigned": "npm run build && electron-builder --config electron-builder.mac.json --mac --arm64"
+    "dist:mac:unsigned": "npm run build && electron-builder --config electron-builder.mac.json --mac --arm64",
+    "test:navigation": "node --test tests/assetLibrary.test.cjs && esbuild tests/sceneOrganization.test.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/sceneOrganization.test.mjs && node node_modules/.tmp/sceneOrganization.test.mjs",
+    "test:navigation-ui": "electron tests/navigation.cjs"
   },
   "dependencies": {
     "@react-three/drei": "9.108.3",

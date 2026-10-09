@@ -21,7 +21,7 @@ export function copySelection(s: EditableScene, session: string): string {
 }
 export function removeSelection(s: EditableScene, ids: ReadonlySet<string>): EditableScene {
   const sourceConfigs = s.sourceConfigs.filter(o => !ids.has(o.id));
-  return { ...s, sourceConfigs, audiencePlanes: s.audiencePlanes.filter(p => !ids.has(p.id)), rigidObjects: s.rigidObjects.filter(o => !ids.has(o.id)),
+  return { ...s, organization: { groups: s.organization.groups.map(g => ({ ...g, members: g.members.filter(id => !ids.has(id)) })) }, sourceConfigs, audiencePlanes: s.audiencePlanes.filter(p => !ids.has(p.id)), rigidObjects: s.rigidObjects.filter(o => !ids.has(o.id)),
     microphones: s.microphones.filter(o => !ids.has(o.id)), selectedInstances: s.selectedInstances.filter(id => !ids.has(id)),
     fidelity: sourceConfigs.length ? s.fidelity : "pattern" };
 }

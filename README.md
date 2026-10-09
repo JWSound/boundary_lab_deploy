@@ -19,6 +19,10 @@ npm run build
 npm start
 ```
 
+Development launches (including `npm start`) use the repository `.venv` when it
+exists. `DEPLOY_PYTHON_EXE` or `BLAB_PYTHON_EXE` can explicitly select another
+interpreter.
+
 Use `npm run dev` for development. Pattern preview needs no Python or Julia solve runtime.
 Boundary/Coupled require Julia and the BEAT Julia environment for the selected backend.
 The desktop probes CUDA on Windows/Linux and Metal on Apple Silicon, falling back

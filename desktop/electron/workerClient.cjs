@@ -24,7 +24,9 @@ class DeployWorkerClient {
       rmSync(previous, { force: true });
       renameSync(runtime.logFile, previous);
     }
-    this.process = spawn(runtime.python, ["-I", "-B", "-X", "utf8", "-m", "boundary_deploy.worker"], {
+    this.stdoutBuffer = "";
+    let stderrTail = "";
+    const child = spawn(runtime.python, ["-I", "-B", "-X", "utf8", "-m", "boundary_deploy.worker"], {
       cwd: runtime.cwd,
       env: runtime.env,
       windowsHide: true,
@@ -33,22 +35,32 @@ class DeployWorkerClient {
       detached: process.platform !== "win32",
       stdio: ["pipe", "pipe", "pipe"],
     });
+    this.process = child;
     this.readyPromise = new Promise((resolve, reject) => {
       this.resolveReady = resolve;
       this.rejectReady = reject;
     });
-    this.process.stdout.setEncoding("utf8");
-    this.process.stdout.on("data", (chunk) => this.consumeStdout(chunk));
-    this.process.stderr.setEncoding("utf8");
-    this.process.stderr.on("data", (chunk) => {
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => { if (this.process === child) this.consumeStdout(chunk); });
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => {
+      stderrTail = (stderrTail + chunk).slice(-8192);
       const message = chunk.trim();
       if (message) {
         console.error(`Deploy solve worker: ${message}`);
         if (runtime.logFile) appendFileSync(runtime.logFile, `${new Date().toISOString()} ${message}\n`);
       }
     });
-    this.process.once("error", (error) => this.handleExit(error));
-    this.process.once("exit", (code) => this.handleExit(new Error(`Deploy solve worker exited with code ${code}.`)));
+    child.once("error", (error) => {
+      if (this.process === child) this.handleExit(new Error(`Could not start Deploy solve worker with ${runtime.python}: ${error.message}`));
+    });
+    // close follows stderr drainage; exit can arrive before the final traceback.
+    child.once("close", (code, signal) => {
+      if (this.process !== child) return;
+      const reason = signal ? `signal ${signal}` : `code ${code}`;
+      const detail = stderrTail.trim();
+      this.handleExit(new Error(`Deploy solve worker exited with ${reason}. Interpreter: ${runtime.python}${detail ? `\n${detail}` : ""}`));
+    });
     return this.readyPromise;
   }
 
@@ -228,7 +240,7 @@ class DeployWorkerClient {
       }
       this.process.kill();
     }
-    this.process = null;
+    this.handleExit(new Error("Deploy solve worker closed."));
   }
 }
 
