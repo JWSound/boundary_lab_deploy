@@ -18,8 +18,15 @@ from build_runtime import ROOT, digest, download, run
 
 def extract(archive: Path, destination: Path):
     # Python 3.12+ rejects escaping paths and symlinks while preserving executable modes.
+    def runtime_filter(member, directory):
+        # Julia's macOS tarball contains AppleDouble sidecars. ditto consumes these
+        # as resource-fork metadata, so they cannot be inventoried as payload files.
+        if Path(member.name).name.startswith("._") or "__MACOSX" in Path(member.name).parts:
+            return None
+        return tarfile.data_filter(member, directory)
+
     with tarfile.open(archive) as source:
-        source.extractall(destination, filter="data")
+        source.extractall(destination, filter=runtime_filter)
 
 
 def main():
