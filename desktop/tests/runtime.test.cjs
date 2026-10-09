@@ -101,3 +101,19 @@ test("macOS runtime uses native paths, isolated overrides and a writable depot",
     assert.throws(() => resolveRuntime({ ...options, platform: "win32" }), /does not match/);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test("development prefers the repository virtual environment on macOS and Windows", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "deploy-dev-runtime-"));
+  try {
+    for (const [platform, suffix] of [["darwin", ["bin", "python"]], ["win32", ["Scripts", "python.exe"]]]) {
+      const python = path.join(root, ".venv", ...suffix);
+      fs.mkdirSync(path.dirname(python), { recursive: true });
+      fs.writeFileSync(python, "");
+      const options = { packaged: false, repositoryRoot: root, platform, env: {} };
+      assert.equal(resolveRuntime(options).python, python);
+      assert.equal(resolveRuntime({ ...options, env: { DEPLOY_PYTHON_EXE: "explicit" } }).python, "explicit");
+      assert.equal(resolveRuntime({ ...options, env: { BLAB_PYTHON_EXE: "legacy" } }).python, "legacy");
+    }
+    assert.equal(resolveRuntime({ packaged: false, repositoryRoot: path.join(root, "no-venv"), env: {} }).python, "python");
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

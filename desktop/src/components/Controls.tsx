@@ -1,13 +1,11 @@
 import { withPlaneDensity } from "../model/planeSampling";
 import type { LucideIcon } from "lucide-react";
-import { Box, CircleDot, Grid3X3, Mic2, Palette, Plus, Radio, Speaker, SlidersHorizontal, Trash2 } from "lucide-react";
-import type { ChangeEvent, MouseEvent, ReactNode } from "react";
+import { Box, CircleDot, Grid3X3, Palette, Plus, Radio, Speaker, SlidersHorizontal, Trash2 } from "lucide-react";
+import type { ChangeEvent, ReactNode } from "react";
 import { useEffect, useState } from "react";
 import type {
-  LoadedSpeakerPackage,
   MicrophoneConfiguration,
   ObservationPlane,
-  RigidMeshAsset,
   RigidMeshConfiguration,
   SourceConfiguration,
   DeployChannel,
@@ -18,133 +16,6 @@ export function SectionHeader({ icon: Icon, title, action }: { icon: LucideIcon;
     <div className="section-header">
       <div className="section-title"><Icon size={15} strokeWidth={1.8} /><span>{title}</span></div>
       {action}
-    </div>
-  );
-}
-
-export function RigidMeshCard({
-  asset,
-  active,
-  onSelect,
-  onAdd,
-}: {
-  asset: RigidMeshAsset;
-  active: boolean;
-  onSelect: () => void;
-  onAdd: () => void;
-}) {
-  return (
-    <div className={`package-card ${active ? "active" : ""}`} data-rigid-mesh-id={asset.id} onClick={onSelect} role="button" tabIndex={0}>
-      <div className="package-visual"><Box size={29} strokeWidth={1.2} /></div>
-      <div className="package-details">
-        <div className="package-name">{asset.name}</div>
-        <div className="package-subtitle">{asset.fileName}</div>
-        <div className="mesh-metrics">{asset.vertexCount.toLocaleString()} vertices / {asset.triangleCount.toLocaleString()} faces</div>
-      </div>
-      <button
-        className="icon-button quiet"
-        title={`Add ${asset.name} to scene`}
-        aria-label={`Add ${asset.name} to scene`}
-        onClick={(event) => { event.stopPropagation(); onAdd(); }}
-      ><Plus size={15} /></button>
-    </div>
-  );
-}
-
-export function PackageCard({
-  pkg,
-  active,
-  onSelect,
-  onAdd,
-}: {
-  pkg: LoadedSpeakerPackage;
-  active: boolean;
-  onSelect: () => void;
-  onAdd: () => void;
-}) {
-  const level = pkg.manifest.fidelity_level;
-  return (
-    <div className={`package-card ${active ? "active" : ""}`} data-package-id={pkg.id} onClick={onSelect} role="button" tabIndex={0}>
-      <div className="package-visual"><Speaker size={30} strokeWidth={1.2} /></div>
-      <div className="package-details">
-        <div className="package-name">{pkg.manifest.name}</div>
-        <div className="package-subtitle">{pkg.isDemo ? "Built-in prototype model" : pkg.fileName}</div>
-        <div className="fidelity-ticks" aria-label={`Fidelity level ${level}`}>
-          {[1, 2, 3].map((item) => <span key={item} className={item <= level ? "active" : ""} />)}
-          <small>L{level}</small>
-        </div>
-      </div>
-      <button
-        className="icon-button quiet"
-        title={`Add ${pkg.manifest.name} to scene`}
-        aria-label={`Add ${pkg.manifest.name} to scene`}
-        onClick={(event) => { event.stopPropagation(); onAdd(); }}
-      ><Plus size={15} /></button>
-    </div>
-  );
-}
-
-export function SceneTree({
-  audiencePlanes,
-  packages,
-  rigidMeshes,
-  sources,
-  rigidObjects,
-  microphones,
-  selectedIds,
-  activeId,
-  onSelect,
-}: {
-  audiencePlanes: import("../model/types").AudiencePlane[];
-  packages: LoadedSpeakerPackage[];
-  rigidMeshes: RigidMeshAsset[];
-  sources: SourceConfiguration[];
-  rigidObjects: RigidMeshConfiguration[];
-  microphones: MicrophoneConfiguration[];
-  selectedIds: readonly string[];
-  activeId: string | null;
-  onSelect: (id: string, additive: boolean) => void;
-}) {
-  const packageById = new Map(packages.map((pkg) => [pkg.id, pkg]));
-  const rigidMeshById = new Map(rigidMeshes.map((asset) => [asset.id, asset]));
-  const select = (id: string, event: MouseEvent<HTMLButtonElement>) => {
-    onSelect(id, event.ctrlKey || event.metaKey);
-  };
-  return (
-    <div className="scene-tree">
-      {sources.map((source) => (
-        <button
-          key={source.id}
-          data-object-id={source.id}
-          aria-selected={selectedIds.includes(source.id)}
-          className={`tree-row tree-button ${selectedIds.includes(source.id) ? "selected" : ""} ${activeId === source.id ? "active-selection" : ""}`}
-          onClick={(event) => select(source.id, event)}
-        ><Speaker size={15} /><span>{source.name}</span><em>{packageById.get(source.packageId)?.manifest.name ?? "SUB"}</em></button>
-      ))}
-      {rigidObjects.map((object) => (
-        <button
-          key={object.id}
-          data-object-id={object.id}
-          aria-selected={selectedIds.includes(object.id)}
-          className={`tree-row tree-button ${selectedIds.includes(object.id) ? "selected" : ""} ${activeId === object.id ? "active-selection" : ""}`}
-          onClick={(event) => select(object.id, event)}
-        ><Box size={15} /><span>{object.name}</span><em>{rigidMeshById.get(object.assetId)?.name ?? "RIGID"}</em></button>
-      ))}
-      {microphones.map((microphone) => (
-        <button
-          key={microphone.id}
-          data-object-id={microphone.id}
-          aria-selected={selectedIds.includes(microphone.id)}
-          className={`tree-row tree-button ${selectedIds.includes(microphone.id) ? "selected" : ""} ${activeId === microphone.id ? "active-selection" : ""}`}
-          onClick={(event) => select(microphone.id, event)}
-        ><Mic2 size={15} /><span>{microphone.name}</span><em>MIC</em></button>
-      ))}
-      {audiencePlanes.map(plane => <button key={plane.id}
-        data-object-id={plane.id}
-        aria-selected={selectedIds.includes(plane.id)}
-        className={`tree-row tree-button ${selectedIds.includes(plane.id) ? "selected" : ""} ${activeId === plane.id ? "active-selection" : ""}`}
-        onClick={(event) => select(plane.id, event)}
-      ><Grid3X3 size={15} /><span>{plane.name}</span><em>PLANE</em></button>)}
     </div>
   );
 }

@@ -1,6 +1,11 @@
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("boundaryLabDesktop", {
+  getDroppedFilePath: file => webUtils.getPathForFile(file),
+  scanLibrary: () => ipcRenderer.invoke("deploy:library-scan"),
+  libraryFolder: action => ipcRenderer.invoke("deploy:library-folder", action),
+  readLibraryAsset: (path, fingerprint) => ipcRenderer.invoke("deploy:library-read", path, fingerprint),
+  importLibraryAssets: paths => ipcRenderer.invoke("deploy:library-import", paths),
   getSolverBackend: () => ipcRenderer.invoke("deploy:get-solver-backend"),
   setSolverBackend: (backend) => ipcRenderer.invoke("deploy:set-solver-backend", backend),
   readSceneClipboard: () => ipcRenderer.invoke("deploy:read-scene-clipboard"),

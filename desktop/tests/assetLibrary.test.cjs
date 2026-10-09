@@ -1,0 +1,62 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const { mkdtemp, mkdir, writeFile, readFile, rm, rename } = require('node:fs/promises');
+const { tmpdir } = require('node:os');
+const { join } = require('node:path');
+const { zipSync, strToU8 } = require('fflate');
+const { AssetLibrary } = require('../electron/assetLibrary.cjs');
+const packageBytes = name => zipSync({ 'manifest.json': strToU8(JSON.stringify({ schema: 'boundary-lab-speaker-package', schema_version: 1, name, fidelity_level: 2 })), 'large-payload': strToU8('not needed to index') });
+async function fixture(t) {
+  const root = await mkdtemp(join(tmpdir(), 'deploy-library-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const managed = join(root, 'library'), builtin = join(root, 'builtin');
+  await mkdir(builtin);
+  return { root, managed, builtin, library: new AssetLibrary(join(root, 'settings.json'), managed, builtin, join(root, 'cache')) };
+}
+test('recursive discovery, invalid packages, updates and removal do not mutate pinned data', async t => {
+  const { managed, library } = await fixture(t);
+  await library.scan();
+  await mkdir(join(managed, 'sub'));
+  const path = join(managed, 'sub', 'speaker.blabsp');
+  await writeFile(path, packageBytes('Original'));
+  await writeFile(join(managed, 'broken.blabsp'), 'not a zip');
+  let snapshot = await library.scan();
+  assert.equal(snapshot.entries.length, 2);
+  assert.ok(snapshot.entries.find(e => e.fileName === 'broken.blabsp').error);
+  const entry = snapshot.entries.find(e => e.name === 'Original');
+  const selection = await library.read(path, entry.fingerprint);
+  await writeFile(path, packageBytes('Updated'));
+  snapshot = await library.scan();
+  assert.equal(snapshot.entries.find(e => e.path === path).name, 'Updated');
+  assert.notEqual(snapshot.entries.find(e => e.path === path).fingerprint, entry.fingerprint);
+  await assert.rejects(library.read(path, entry.fingerprint), /changed/);
+  assert.deepEqual(await readFile(selection.path), Buffer.from(packageBytes('Original')));
+  await rm(path);
+  assert.equal((await library.scan()).entries.length, 1);
+  assert.ok((await readFile(selection.path)).length);
+});
+test('imports preserve originals, deduplicate content and never overwrite filename collisions', async t => {
+  const { root, library } = await fixture(t);
+  const external = join(root, 'speaker.blabsp');
+  const original = packageBytes('First');
+  await writeFile(external, original);
+  const first = await library.import([external]);
+  const repeated = await library.import([external]);
+  assert.equal(first.results[0].destination, repeated.results[0].destination);
+  await writeFile(external, packageBytes('Second'));
+  const changed = await library.import([external, join(root, 'missing.blabsp')]);
+  assert.notEqual(first.results[0].destination, changed.results[0].destination);
+  assert.deepEqual(await readFile(first.results[0].destination), Buffer.from(original));
+  assert.ok(changed.results[1].error);
+  assert.deepEqual(await readFile(external), Buffer.from(packageBytes('Second')));
+});
+test('folder choice persists and missing chosen folders are reported without recreation', async t => {
+  const { root, library, builtin } = await fixture(t);
+  const chosen = join(root, 'chosen'); await mkdir(chosen);
+  await library.setRoot(chosen);
+  const reopened = new AssetLibrary(join(root, 'settings.json'), join(root, 'default'), builtin, join(root, 'cache'));
+  assert.equal(await reopened.root(), chosen);
+  await rename(chosen, `${chosen}-moved`);
+  const snapshot = await reopened.scan();
+  assert.ok(snapshot.errors.some(e => e.includes(chosen)));
+});

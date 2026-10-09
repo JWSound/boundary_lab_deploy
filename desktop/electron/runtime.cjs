@@ -4,8 +4,11 @@ const { join } = require("node:path");
 function resolveRuntime({ packaged, resourcesPath, dataPath, repositoryRoot, env = process.env,
                           platform = process.platform, arch = process.arch }) {
   if (!packaged) {
+    const localPython = platform === "win32"
+      ? join(repositoryRoot, ".venv", "Scripts", "python.exe")
+      : join(repositoryRoot, ".venv", "bin", "python");
     return {
-      python: env.DEPLOY_PYTHON_EXE || env.BLAB_PYTHON_EXE || "python",
+      python: env.DEPLOY_PYTHON_EXE || env.BLAB_PYTHON_EXE || (existsSync(localPython) ? localPython : "python"),
       cwd: repositoryRoot,
       env: { ...env },
     };

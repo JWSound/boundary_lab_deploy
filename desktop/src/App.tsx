@@ -1,3 +1,7 @@
+import { assetIdentity } from "./model/assetIdentity";
+import { SceneOutliner } from "./components/SceneOutliner";
+import { AssetBrowser, type AssetRow } from "./components/AssetBrowser";
+import { emptyOrganization } from "./model/sceneOrganization";
 import { SolverPreferencesDialog } from "./components/SolverPreferencesDialog";
 import { resizedPlaneGrid, validatePlaneSampling } from "./model/planeSampling";
 import { FilterBankEditor } from "./components/FilterBankEditor";
@@ -9,14 +13,12 @@ import {
   Box,
   FolderOpen,
   Grid3X3,
-  Import,
   Maximize2,
   Mic2,
   MousePointer2,
   Move3D,
   Pause,
   Play,
-  Plus,
   Rotate3D,
   Save,
   Settings2,
@@ -37,13 +39,10 @@ import {
   browserFileHandler,
   ChannelsPanel,
   MicrophoneInspector,
-  PackageCard,
   PlaneResolutionInspector,
-  SceneTree,
   SectionHeader,
   Slider,
   SourceInspector,
-  RigidMeshCard,
   RigidMeshInspector,
 } from "./components/Controls";
 import { loadSpeakerPackage } from "./io/speakerPackage";
@@ -81,7 +80,8 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     setFrequencyIndex, setFidelity, setSelectedInstances, setProjectName } = useSceneEditor();
   const { packages, activePackageId, sourceConfigs, channels, activeChannelId, rigidMeshes,
     activeRigidMeshId, rigidObjects, microphones, audiencePlanes, heatmapScale, systemGainDb, activePlaneId, frequencyIndex, fidelity,
-    selectedInstances, projectName } = present;
+    selectedInstances, projectName, organization } = present;
+  const [frameRequest, setFrameRequest] = useState<{ ids: string[]; serial: number } | null>(null);
   const pkg = packages.find((candidate) => candidate.id === activePackageId) ?? packages[0];
   const frequenciesHz = pkg?.frequenciesHz ?? EMPTY_FREQUENCIES;
   const activePlane = audiencePlanes.find(p => p.id === activePlaneId) ?? audiencePlanes[0];
@@ -102,6 +102,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
   const [phaseAnimationEnabled, setPhaseAnimationEnabled] = useState(false);
   const clipboardPending = useRef(false);
   const browserClipboard = useRef("");
+  const [assetNotice, setAssetNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [solverBackend, setSolverBackend] = useState<"cpu" | "cuda" | "metal" | null>(null);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
@@ -123,7 +124,8 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     finally { setPreferencesSaving(false); }
   };
 
-  const [leftTab, setLeftTab] = useState<"library" | "scene" | "channels">("library");
+  const [navigatorSplit, setNavigatorSplit] = useState(54);
+  const [leftTab, setLeftTab] = useState<"scene" | "channels">("scene");
   const [equalizerPopup, setEqualizerPopup] = useState<{ scope: "channel" | "speaker"; id: string } | null>(null);
   const equalizerTarget = equalizerPopup?.scope === "channel" ? channels.find(c => c.id === equalizerPopup.id)
     : sourceConfigs.find(c => c.id === equalizerPopup?.id);
@@ -476,6 +478,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     fidelity,
     heatmapScale,
     systemGainDb,
+    organization,
   ));
   const projectEdited = savedProjectSnapshot === null || savedProjectSnapshot !== currentProjectContents;
   const captureCurrentAnalysis = () => {
@@ -509,6 +512,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
   const initializePackage = (next: LoadedSpeakerPackage) => {
     solveGeneration.current += 1;
     sweepGeneration.current += 1; microphoneSweepKeyRef.current = null;
+    editor.set("organization", emptyOrganization());
     setPackages([next]);
     setActivePackageId(next.id);
     const defaultChannel = { ...createDefaultChannel(), levelDb: 0 };
@@ -555,8 +559,10 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
       updated[existingIndex] = next;
       return updated;
     });
-    setActivePackageId(next.id);
-    setFrequencyIndex(nearestFrequencyIndex(next, frequenciesHz[frequencyIndex]));
+    if (!editor.present.sourceConfigs.length && editor.present.packages.length <= 1) {
+      setActivePackageId(next.id);
+      setFrequencyIndex(nearestFrequencyIndex(next, frequenciesHz[frequencyIndex]));
+    }
     setError(null);
   };
 
@@ -626,7 +632,9 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
       nextFidelity,
       project.heatmap_scale,
       project.system_gain_db,
+      project.scene_organization,
     ));
+    editor.set("organization", project.scene_organization);
     setPackages(nextPackages);
     setRigidMeshes(nextRigidMeshes);
     setActiveRigidMeshId(nextRigidMeshes[0]?.id ?? null);
@@ -752,22 +760,10 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     });
   }), []);
 
-  const openPackage = async () => {
-    try {
-      if (window.boundaryLabDesktop) {
-        const selection = await window.boundaryLabDesktop.openSpeakerPackage();
-        if (selection) importPackage(loadSpeakerPackage(selection.bytes, selection.name, selection.path));
-      } else {
-        packageFileInput.current?.click();
-      }
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    }
-  };
-
   const loadBrowserFile = async (file: File) => {
     try {
-      importPackage(loadSpeakerPackage(await file.arrayBuffer(), file.name));
+      const loaded = loadSpeakerPackage(await file.arrayBuffer(), file.name);
+      importPackage(loaded);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     }
@@ -785,22 +781,10 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     setError(null);
   };
 
-  const openRigidMesh = async () => {
-    try {
-      if (window.boundaryLabDesktop) {
-        const selection = await window.boundaryLabDesktop.openRigidMesh();
-        if (selection) importRigidAsset(loadRigidMesh(selection.bytes, selection.name, selection.path));
-      } else {
-        rigidMeshFileInput.current?.click();
-      }
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    }
-  };
-
   const loadBrowserRigidMesh = async (file: File) => {
     try {
-      importRigidAsset(loadRigidMesh(await file.arrayBuffer(), file.name));
+      const loaded = loadRigidMesh(await file.arrayBuffer(), file.name);
+      importRigidAsset(loaded);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     }
@@ -817,12 +801,14 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     const nextPackages = selection.packages.map((item, index) => ({
       ...loadSpeakerPackage(item.bytes, item.name, item.path),
       id: project.packages[index].id,
+      originalPath: project.packages[index].original_path ?? item.originalPath,
+      fingerprint: project.packages[index].fingerprint ?? item.fingerprint,
     }));
     const nextRigidMeshes = selection.rigidMeshes.map((item, index) => {
       const reference = project.rigid_meshes[index];
       const loaded = loadRigidMesh(item.bytes, item.name, item.path, reference.scale_to_meters);
-      if (loaded.id !== reference.id) throw new Error(`Located mesh does not match ${reference.name}.`);
-      return { ...loaded, name: reference.name };
+      if (!reference.fingerprint && loaded.id !== reference.id) throw new Error(`Located mesh does not match ${reference.name}.`);
+      return { ...loaded, id: reference.id, name: reference.name, originalPath: reference.original_path ?? item.originalPath, fingerprint: reference.fingerprint ?? item.fingerprint };
     });
     applyProject(project, nextPackages, nextRigidMeshes, selection.name);
     void window.boundaryLabDesktop?.rememberProject(selection.path, project.name).catch(() => {});
@@ -837,7 +823,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
           const selection = await window.boundaryLabDesktop?.loadBundledExample();
           if (!active) return;
           if (window.boundaryLabDesktop && !selection) throw new Error("The bundled S218BP example could not be found.");
-          initializePackage(selection ? loadSpeakerPackage(selection.bytes, selection.name, selection.path) : createDemoPackage());
+          initializePackage(selection ? { ...loadSpeakerPackage(selection.bytes, selection.name, selection.path), originalPath: selection.originalPath, fingerprint: selection.fingerprint } : createDemoPackage());
         } catch (caught) { if (active) setError(String(caught)); }
       })();
     } else { setSavedProjectSnapshot(currentProjectContents); }
@@ -1561,7 +1547,10 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
   };
 
   const addSource = (packageId = activePackageId) => {
-    const sourcePackage = packageById.get(packageId) ?? pkg;
+    const { packages, rigidMeshes, sourceConfigs, rigidObjects, channels, activeChannelId } = editor.present;
+    const sources = sourceConfigs.map(buildSourceInstance), rigidInstances = rigidObjects.map(buildRigidInstance);
+    const boundaryAssetById = new Map<string, BoundaryMeshAsset>([...packages, ...rigidMeshes].map(a => [a.id, a]));
+    const sourcePackage = packages.find(p => p.id === packageId);
     if (!sourcePackage) return;
     const existingIds = new Set([...sourceConfigs.map((source) => source.id), ...rigidObjects.map((object) => object.id)]);
     let suffix = sourceConfigs.length + 1;
@@ -1600,7 +1589,10 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
 
   const addRigidObject = (assetId = activeRigidMeshId) => {
     if (!assetId) return;
-    const asset = rigidMeshById.get(assetId);
+    const { packages, rigidMeshes, sourceConfigs, rigidObjects, microphones } = editor.present;
+    const sources = sourceConfigs.map(buildSourceInstance), rigidInstances = rigidObjects.map(buildRigidInstance);
+    const boundaryAssetById = new Map<string, BoundaryMeshAsset>([...packages, ...rigidMeshes].map(a => [a.id, a]));
+    const asset = rigidMeshes.find(a => a.id === assetId);
     if (!asset) return;
     const existingIds = new Set([
       ...sourceConfigs.map((source) => source.id),
@@ -1657,6 +1649,98 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     setMicrophones((current) => [...current, next]);
     setSelectedInstances([next.id]);
     setTransformMode("select");
+  };
+
+  const projectAssets: AssetRow[] = [
+    ...packages.map(p => ({ key: `project:${p.id}`, projectId: p.id, kind: "speaker" as const, location: "project" as const, name: p.manifest.name, fileName: p.fileName, path: p.sourcePath, originalPath: p.originalPath, fingerprint: p.fingerprint, level: p.manifest.fidelity_level })),
+    ...rigidMeshes.map(p => ({ key: `project:${p.id}`, projectId: p.id, kind: "rigid" as const, location: "project" as const, name: p.name, fileName: p.fileName, path: p.sourcePath, originalPath: p.originalPath, fingerprint: p.fingerprint })),
+  ];
+  const addDesktopAsset = async (selection: DesktopPackageSelection, kind: "speaker" | "rigid") => {
+    if (kind === "speaker") {
+      const loaded = { ...loadSpeakerPackage(selection.bytes, selection.name, selection.path), originalPath: selection.originalPath, fingerprint: selection.fingerprint };
+      // Package manifests do not yet carry a unique identity. Content identifies new imports.
+      loaded.id = selection.fingerprint ? assetIdentity("package", selection.fingerprint, editor.present.packages) : loaded.id;
+      const existing = editor.present.packages.find(p => p.fingerprint === loaded.fingerprint && loaded.fingerprint);
+      editor.run("Add speaker", () => { if (!existing) importPackage(loaded); addSource(existing?.id ?? loaded.id); });
+    } else {
+      const loaded = { ...loadRigidMesh(selection.bytes, selection.name, selection.path), originalPath: selection.originalPath, fingerprint: selection.fingerprint };
+      const existing = editor.present.rigidMeshes.find(p => p.fingerprint === loaded.fingerprint && loaded.fingerprint);
+      loaded.id = selection.fingerprint ? assetIdentity("rigid", selection.fingerprint, editor.present.rigidMeshes) : loaded.id;
+      editor.run("Add rigid object", () => { if (!existing) importRigidAsset(loaded); addRigidObject(existing?.id ?? loaded.id); });
+    }
+  };
+  const addAsset = async (asset: AssetRow) => {
+    if (asset.projectId) {
+      editor.run("Add scene object", () => asset.kind === "speaker" ? addSource(asset.projectId) : addRigidObject(asset.projectId));
+    } else if (window.boundaryLabDesktop && asset.path) {
+      const session = editor.session;
+      const selection = await window.boundaryLabDesktop.readLibraryAsset(asset.path, asset.fingerprint);
+      if (session !== editor.session) return;
+      await addDesktopAsset(selection, asset.kind);
+    }
+  };
+  const dropFiles = async (files: File[]) => {
+    const messages: string[] = [];
+    const desktop = window.boundaryLabDesktop;
+    const session = editor.session;
+    if (desktop) {
+      const result = await desktop.importLibraryAssets(files.map(f => desktop.getDroppedFilePath(f)));
+      return result.results.map(r => `${r.path.split(/[\\/]/).pop()}: ${r.error ?? "imported"}`);
+    }
+    for (const file of files) {
+      try {
+        const kind = file.name.toLowerCase().endsWith(".blabsp") ? "speaker" : file.name.toLowerCase().endsWith(".msh") ? "rigid" : null;
+        if (!kind) throw new Error("Use a .blabsp speaker package or .msh mesh.");
+        const bytes = await file.arrayBuffer();
+        if (session !== editor.session) break;
+        editor.run("Import asset", () => {
+          if (kind === "speaker") importPackage(loadSpeakerPackage(bytes, file.name));
+          else importRigidAsset(loadRigidMesh(bytes, file.name));
+        });
+        messages.push(`${file.name}: imported`);
+      } catch (error) { messages.push(`${file.name}: ${error instanceof Error ? error.message : String(error)}`); }
+    }
+    return messages;
+  };
+  const updateAsset = async (asset: AssetRow, replacement: AssetRow) => {
+    if (!window.boundaryLabDesktop || !replacement.path || !asset.projectId) return;
+    const session = editor.session;
+    const selection = await window.boundaryLabDesktop.readLibraryAsset(replacement.path, replacement.fingerprint);
+    if (session !== editor.session) return;
+    const scene = editor.present;
+    const metadata = { originalPath: selection.originalPath, fingerprint: selection.fingerprint };
+    const nextPackages = asset.kind === "speaker" ? scene.packages.map(p => p.id === asset.projectId ? { ...loadSpeakerPackage(selection.bytes, selection.name, selection.path), ...metadata, id: p.id } : p) : scene.packages;
+    const nextMeshes = asset.kind === "rigid" ? scene.rigidMeshes.map(p => p.id === asset.projectId ? { ...loadRigidMesh(selection.bytes, selection.name, selection.path, p.scaleToMeters), ...metadata, id: p.id } : p) : scene.rigidMeshes;
+    const assets = new Map<string, BoundaryMeshAsset>([...nextPackages, ...nextMeshes].map(p => [p.id, p]));
+    const instances = [...scene.sourceConfigs.map(buildSourceInstance), ...scene.rigidObjects.map(buildRigidInstance)];
+    if (cabinetClearanceViolations(assets, instances).length) throw new Error("The updated asset would overlap other objects or the ground. Reposition the objects before applying this update.");
+    const currentHz = frequenciesHz[frequencyIndex];
+    editor.run("Update project asset", () => {
+      setPackages(nextPackages); setRigidMeshes(nextMeshes);
+      const reference = nextPackages.find(p => p.id === scene.activePackageId) ?? nextPackages[0];
+      if (reference) setFrequencyIndex(nearestFrequencyIndex(reference, currentHz));
+    });
+    // Cached solve keys include package paths; invalidate current results immediately.
+    solveGeneration.current++; sweepGeneration.current++; microphoneSweepKeyRef.current = null;
+    setLiveSolveEnabled(false); setSolvedFields(emptySolvedFieldCache()); setBoundarySolutionKey(null); setSolveState("idle");
+    void window.boundaryLabDesktop.cancelMicrophoneSweep().catch(() => {});
+    setMicrophoneSweepState("idle"); setBemMicrophoneResponses(null); setDriverExcursion(null); setElectricalResponse(null); setAcousticResponse(null);
+    setRawSweeps({}); setResponseHistory({}); setRetainedExcursion(null); setRetainedElectrical(null);
+  };
+  const selectOutlinerObjects = (ids: string[]) => {
+    const allowed = ids;
+    setSelectedInstances(allowed);
+    const last = allowed.at(-1);
+    if (audiencePlanes.some(p => p.id === last)) setActivePlaneId(last!);
+    setTransformMode("select");
+  };
+  const renameObject = (id: string, name: string) => {
+    const scene = editor.present;
+    editor.update({ ...scene, sourceConfigs: scene.sourceConfigs.map(o => o.id === id ? { ...o, name } : o),
+      rigidObjects: scene.rigidObjects.map(o => o.id === id ? { ...o, name } : o),
+      microphones: scene.microphones.map(o => o.id === id ? { ...o, name } : o),
+      audiencePlanes: scene.audiencePlanes.map(o => o.id === id ? { ...o, name } : o) }, "Rename object");
+    syncSceneRefs();
   };
 
   const canRemoveSelectedSources = selectedSourceIds.length > 0;
@@ -1948,121 +2032,54 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
         busy={preferencesSaving || solveState === "solving" || microphoneSweepState === "solving"}
         onChange={changeSolverBackend} onClose={() => setPreferencesOpen(false)} />}
 
-      <aside className="left-panel panel">
-        <div className="panel-tabs">
-          <button className={leftTab === "library" ? "active" : ""} onClick={() => setLeftTab("library")}>Library</button>
-          <button className={leftTab === "scene" ? "active" : ""} onClick={() => setLeftTab("scene")}>Scene</button>
-          <button className={leftTab === "channels" ? "active" : ""} onClick={() => setLeftTab("channels")}>Channels</button>
+      <aside className="left-panel panel navigator-panel">
+        <div className="navigator-upper" style={{ height: `${navigatorSplit}%` }}>
+          <div className="panel-tabs"><button className={leftTab === "scene" ? "active" : ""} onClick={() => setLeftTab("scene")}>Scene</button><button className={leftTab === "channels" ? "active" : ""} onClick={() => setLeftTab("channels")}>Channels</button></div>
+          {leftTab === "scene" ? <SceneOutliner
+            objects={[
+              ...sourceConfigs.map(o => ({ id: o.id, name: o.name, kind: "speaker" as const, detail: channels.find(c => c.id === o.channelId)?.name ?? "Speaker" })),
+              ...rigidObjects.map(o => ({ id: o.id, name: o.name, kind: "rigid" as const, detail: "Rigid" })),
+              ...microphones.map(o => ({ id: o.id, name: o.name, kind: "microphone" as const, detail: "Mic" })),
+              ...audiencePlanes.map(o => ({ id: o.id, name: o.name, kind: "plane" as const, detail: "Plane" })),
+            ]}
+            selected={selectedInstances} active={selectedInstance} organization={organization}
+            onOrganization={value => editor.set("organization", value, true, "Organize scene")}
+            onSelection={selectOutlinerObjects} onRename={renameObject} onDelete={removeSelectedObjects}
+            onDuplicate={() => { try { const next = pasteSelection(editor.present, copySelection(editor.present, editor.session), editor.session); editor.run("Duplicate selection", () => editor.update(next)); syncSceneRefs(); } catch (e) { setError(String(e)); } }}
+            onFrame={ids => setFrameRequest({ ids, serial: Date.now() })} channels={channels}
+            onAssignChannel={(ids, channelId) => editor.run("Assign channels", () => { ids.forEach(id => assignSourceChannel(id, channelId)); })}
+            actions={<div className="section-actions">
+              <button className="icon-button quiet" aria-label="Add microphone" title="Add microphone" onClick={addMicrophone}><Mic2 size={15} /></button>
+              <button className="icon-button quiet" aria-label="Add audience plane" title="Add audience plane" onClick={addAudiencePlane}><Grid3X3 size={15} /></button>
+            </div>}
+
+          /> : <div className="navigator-channels"><SectionHeader icon={SlidersHorizontal} title="System level" /><div className="inspector-section"><Slider label="System gain" value={systemGainDb} minimum={-60} maximum={60} step={0.5} unit=" dB" editable onChange={value => editor.set("systemGainDb", value, true, "Change system gain")} /></div>
+            <ChannelsPanel channels={channels} sources={sourceConfigs} activeChannelId={activeChannelId} onActiveChannelChange={setActiveChannelId} onAdd={addChannel} onRemove={removeChannel} onChange={updateChannel} onAssign={assignSourceChannel} onOpenEqualizer={channel => setEqualizerPopup({ scope: "channel", id: channel.id })} /></div>}
         </div>
-        {leftTab === "library" ? (
-          <>
-            <SectionHeader icon={Import} title="Speaker library" action={<button className="text-button" onClick={openPackage}>Import</button>} />
-            <div className="panel-content package-library">
-              {packages.map((item) => (
-                <PackageCard
-                  key={item.id}
-                  pkg={item}
-                  active={item.id === activePackageId}
-                  onSelect={() => {
-                    setActivePackageId(item.id);
-                    setFrequencyIndex(nearestFrequencyIndex(item, frequenciesHz[frequencyIndex]));
-                  }}
-                  onAdd={() => addSource(item.id)}
-                />
-              ))}
-            </div>
-            <SectionHeader icon={Box} title="Rigid mesh library" action={<button className="text-button" onClick={openRigidMesh}>Import mesh</button>} />
-            <div className="panel-content package-library rigid-mesh-library">
-              {rigidMeshes.length === 0 ? <div className="library-empty">No rigid meshes imported</div> : rigidMeshes.map((asset) => (
-                <RigidMeshCard
-                  key={asset.id}
-                  asset={asset}
-                  active={asset.id === activeRigidMeshId}
-                  onSelect={() => setActiveRigidMeshId(asset.id)}
-                  onAdd={() => addRigidObject(asset.id)}
-                />
-              ))}
-            </div>
-            <SectionHeader
-              icon={Speaker}
-              title="Scene objects"
-              action={(
-                <div className="section-actions">
-                  <button className="section-action" title="Add active speaker" aria-label="Add speaker" disabled={!pkg} onClick={() => addSource()}><Plus size={14} /></button>
-                  <button className="section-action" title="Add active rigid mesh" aria-label="Add rigid object" disabled={!activeRigidMeshId} onClick={() => addRigidObject()}><Box size={13} /></button>
-                  <button className="section-action" title="Add audience plane" aria-label="Add audience plane" onClick={addAudiencePlane}><Grid3X3 size={14} /></button>
-                  <button className="section-action" title="Add microphone" aria-label="Add microphone" onClick={addMicrophone}><Mic2 size={14} /></button>
-                  <button
-                    className="section-action"
-                    title={canRemoveSelectedObjects ? "Remove selected objects (Delete)" : "Select a removable scene object"}
-                    aria-label="Remove selected objects"
-                    disabled={!canRemoveSelectedObjects}
-                    onClick={removeSelectedObjects}
-                  ><Trash2 size={13} /></button>
-                </div>
-              )}
-            />
-            <SceneTree audiencePlanes={audiencePlanes} packages={packages} rigidMeshes={rigidMeshes} sources={sourceConfigs} rigidObjects={rigidObjects} microphones={microphones} selectedIds={selectedInstances} activeId={selectedInstance} onSelect={selectSceneObject} />
-          </>
-        ) : leftTab === "scene" ? (
-          <>
-            <SectionHeader icon={SlidersHorizontal} title="System level" />
-            <div className="inspector-section">
-              <Slider label="System gain" value={systemGainDb} minimum={-60} maximum={60} step={0.5} unit=" dB" editable onChange={value => editor.set("systemGainDb", value, true, "Change system gain")} />
-              <p className="package-subtitle">Relative to package reference, before channel and object trims.</p>
-              <p className="package-subtitle">At 2.83 V reference: {(2.83 * 10 ** (systemGainDb / 20)).toFixed(2)} V before trims.</p>
-            </div>
-            <SectionHeader
-              icon={Speaker}
-              title="Scene hierarchy"
-              action={(
-                <div className="section-actions">
-                  <button className="section-action" title="Add active speaker" aria-label="Add speaker" disabled={!pkg} onClick={() => addSource()}><Plus size={14} /></button>
-                  <button className="section-action" title="Add active rigid mesh" aria-label="Add rigid object" disabled={!activeRigidMeshId} onClick={() => addRigidObject()}><Box size={13} /></button>
-                  <button className="section-action" title="Add audience plane" aria-label="Add audience plane" onClick={addAudiencePlane}><Grid3X3 size={14} /></button>
-                  <button className="section-action" title="Add microphone" aria-label="Add microphone" onClick={addMicrophone}><Mic2 size={14} /></button>
-                  <button
-                    className="section-action"
-                    title={canRemoveSelectedObjects ? "Remove selected objects (Delete)" : "Select a removable scene object"}
-                    aria-label="Remove selected objects"
-                    disabled={!canRemoveSelectedObjects}
-                    onClick={removeSelectedObjects}
-                  ><Trash2 size={13} /></button>
-                </div>
-              )}
-            />
-            <SceneTree audiencePlanes={audiencePlanes} packages={packages} rigidMeshes={rigidMeshes} sources={sourceConfigs} rigidObjects={rigidObjects} microphones={microphones} selectedIds={selectedInstances} activeId={selectedInstance} onSelect={selectSceneObject} />
-            <div className="scene-summary">
-              <span>Subwoofer sources</span><strong>{sourceConfigs.length}</strong>
-              <span>Rigid objects</span><strong>{rigidObjects.length}</strong>
-              <span>Observation points</span><strong>{audiencePlanes.reduce((sum, p) => sum + p.columns * p.rows, 0)}</strong>
-              <span>Microphones</span><strong>{microphones.length}</strong>
-              <span>Excitation ports</span><strong>{pkg?.manifest.excitation_port_ids.length ?? 0}</strong>
-            </div>
-          </>
-        ) : (
-          <ChannelsPanel
-            channels={channels}
-            sources={sourceConfigs}
-            activeChannelId={activeChannelId}
-            onActiveChannelChange={setActiveChannelId}
-            onAdd={addChannel}
-            onRemove={removeChannel}
-            onChange={updateChannel}
-            onAssign={assignSourceChannel}
-            onOpenEqualizer={(channel) => setEqualizerPopup({ scope: "channel", id: channel.id })}
-          />
-        )}
+        <div className="navigator-divider" role="separator" tabIndex={0} aria-label="Resize scene and assets" aria-orientation="horizontal" aria-valuemin={25} aria-valuemax={75} aria-valuenow={Math.round(navigatorSplit)}
+          onKeyDown={e => { if (e.key === "ArrowUp" || e.key === "ArrowDown") { e.preventDefault(); setNavigatorSplit(value => Math.max(25, Math.min(75, value + (e.key === "ArrowDown" ? 5 : -5)))); } }}
+          onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); }}
+          onPointerMove={e => { if (e.currentTarget.hasPointerCapture(e.pointerId)) { const bounds = e.currentTarget.parentElement!.getBoundingClientRect(); setNavigatorSplit(Math.max(25, Math.min(75, (e.clientY - bounds.top) / bounds.height * 100))); } }}
+          onPointerUp={e => e.currentTarget.releasePointerCapture(e.pointerId)} />
+        <AssetBrowser projectAssets={projectAssets} onAdd={addAsset} onImportFile={kind => (kind === "speaker" ? packageFileInput : rigidMeshFileInput).current?.click()} onDropFiles={dropFiles} onUpdate={updateAsset} />
       </aside>
 
       <section
         className="viewport"
+        onDragOver={e => { if (e.dataTransfer.types.some(t => t === "Files" || t === "application/x-deploy-asset")) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } }}
+        onDrop={e => {
+          e.preventDefault();
+          const data = e.dataTransfer.getData("application/x-deploy-asset");
+          if (data) { try { void addAsset(JSON.parse(data)).catch(error => setError(String(error))); } catch { setError("Invalid asset drag."); } }
+          else if (e.dataTransfer.files.length) setAssetNotice("Drop files onto Assets below to import them, then use + or drag an asset into the scene.");
+        }}
         data-transform-mode={transformMode}
         data-angle-snap-disabled={angleSnapDisabled}
         data-selected-object-count={selectedInstances.length}
         data-grab-point-count={selectedSource || selectedRigid ? 8 : selectedMicrophone ? 1 : Boolean(activePlane && selectedInstance === activePlane.id) && transformMode === "scale" ? 4 : 0}
       >
         <SceneView
+          frameRequest={frameRequest}
           packages={packages}
           rigidMeshes={rigidMeshes}
           sources={sources}
@@ -2088,6 +2105,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
           onManipulationEnd={flushLiveSolve}
           onFieldTextureReady={recordFieldTexture}
         />
+        {assetNotice && <div className="asset-drop-notice" role="status">{assetNotice}<button aria-label="Dismiss import results" onClick={() => setAssetNotice(null)}>×</button></div>}
         <div className="viewport-toolbar">
           <button className={transformMode === "select" ? "active" : ""} title="Select (Q)" onClick={() => setTransformMode("select")}><MousePointer2 size={15} /></button>
           <button className={transformMode === "translate" ? "active" : ""} disabled={!selectedInstance} title="Translate (W)" onClick={() => setTransformMode("translate")}><Move3D size={15} /></button>

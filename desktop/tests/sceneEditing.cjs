@@ -24,6 +24,8 @@ app.whenReady().then(async()=>{
         cancelMicrophoneSweep:async()=>{window.cancelledSweeps=(window.cancelledSweeps||0)+1;return true;},
         readSceneClipboard:async()=>window.clipText,writeSceneClipboard:async(text)=>{if(window.failWrite)throw Error('Clipboard unavailable');window.clipText=text;},
         saveProject:async(text)=>{window.saved=JSON.parse(text);return 'study.blabdeploy.json';},
+        scanLibrary:async()=>({root:'/fixture',entries:[{key:'Stage.msh',path:'Stage.msh',fileName:'Stage.msh',name:'Stage',kind:'rigid',location:'library',fingerprint:'fixture'}],errors:[]}),
+        readLibraryAsset:async()=>({name:'Stage.msh',path:'Stage.msh',bytes:Uint8Array.from(${JSON.stringify(mesh)}).buffer}),
         openRigidMesh:async()=>({name:'Stage.msh',path:'Stage.msh',bytes:Uint8Array.from(${JSON.stringify(mesh)}).buffer})};
       window.boundaryLabDesktop=window.testDesktop;window.confirm=()=>true;
       createRoot(document.getElementById('root')).render(<App/>);
@@ -36,7 +38,18 @@ app.whenReady().then(async()=>{
     const run=code=>win.webContents.executeJavaScript(code).catch(error=>{throw Error(code+"\n"+error);});
     const delay=ms=>new Promise(r=>setTimeout(r,ms));
     async function wait(code){for(let i=0;i<100;i++){if(await run(`Boolean(${code})`))return;await delay(50);}throw Error('Waiting for '+code);}
-    const click=async selector=>{await run(`document.querySelector(${JSON.stringify(selector)}).click()`);await delay(80);};
+    const addObject = async kind => {
+      if (kind === 'rigid') {
+        await run(`Array.from(document.querySelectorAll('.asset-type-tabs button')).find(b=>b.textContent==='Rigid meshes').click()`); await delay(100);
+        await run(`document.querySelector('.asset-row button[aria-label^="Add "]').click()`);
+      } else await run(`document.querySelector('button[aria-label="${kind === 'plane' ? 'Add audience plane' : 'Add microphone'}"]').click()`);
+      await delay(100);
+    };
+    const click=async selector=>{
+      if (selector === 'button[aria-label="Add audience plane"]') return addObject('plane');
+      if (selector === 'button[aria-label="Add microphone"]') return addObject('microphone');
+      if (selector === 'button[aria-label="Remove selected objects"]') { await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Actions ▾').click()`); await delay(50); await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Delete selected').click()`); await delay(80); return; }
+      await run(`document.querySelector(${JSON.stringify(selector)}).click()`);await delay(80);};
     const key=async(k,mods='')=>{
       const modifiers=['control',...(mods.includes('shiftKey:true')?['shift']:[])];
       win.webContents.sendInputEvent({type:'keyDown',keyCode:k.toUpperCase(),modifiers});
@@ -62,7 +75,7 @@ app.whenReady().then(async()=>{
     await click('dialog button');
     assert.equal((await save()).system_gain_db,32);
     assert.equal((await save()).channels[0].levelDb,-24);
-    await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Scene').click()`);
+    await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Channels').click()`);
     await delay(80);
     assert.equal(await run(`document.querySelector('input[aria-label="System gain"]').value`),'32');
     await run(`(()=>{const input=document.querySelector('input[aria-label="System gain"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'26');input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
@@ -71,7 +84,7 @@ app.whenReady().then(async()=>{
     await key('z');assert.equal((await save()).system_gain_db,32);
     await key('y');assert.equal((await save()).system_gain_db,26);
     await key('z');
-    await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Library').click()`);
+    await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Scene').click()`);
     await delay(80);
 
     const blank=await save();
@@ -194,7 +207,7 @@ app.whenReady().then(async()=>{
     const withEQ=await save();
     assert.equal(withEQ.channels[0].equalizer.filters[0].type,'lowpass');
     assert.deepEqual(withEQ.sources[0].equalizer,speakerBank,'Channel editing does not overwrite speaker EQ');
-    await buttonText('Library');
+    await buttonText('Scene');
 
     await key('d');assert.equal(await count('subwoofer'),2,'Ctrl+D is removed');
     assert.equal(await run('document.querySelectorAll(\'button[aria-label="Duplicate selected boundary objects"]\').length'),0);
@@ -202,9 +215,8 @@ app.whenReady().then(async()=>{
     await key('z');assert.equal(await count('subwoofer'),2);await key('y');assert.equal(await count('subwoofer'),3);
     await key('z');
     await click('button[aria-label="Add microphone"]');
-    await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Import mesh').click()`);
-    await wait('document.querySelector(".rigid-mesh-library .package-card")');
-    await click('button[aria-label="Add rigid object"]');
+    await addObject('rigid');
+    await wait('document.querySelector(".tree-button[data-object-id=rigid-1]")');
     await run(`document.querySelector('.tree-button[data-object-id="subwoofer-1"]').click();`);
     await delay(50);
     for(const id of ['rigid-1','microphone-1']) {

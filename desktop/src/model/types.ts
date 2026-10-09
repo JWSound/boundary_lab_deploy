@@ -43,6 +43,8 @@ export interface LoadedSpeakerPackage {
   id: string;
   fileName: string;
   sourcePath: string | null;
+  originalPath?: string;
+  fingerprint?: string;
   manifest: SpeakerPackageManifest;
   frequenciesHz: Float64Array;
   directionsPackage: Float32Array;
@@ -59,6 +61,8 @@ export interface RigidMeshAsset {
   name: string;
   fileName: string;
   sourcePath: string | null;
+  originalPath?: string;
+  fingerprint?: string;
   scaleToMeters: number;
   mesh: SpeakerMesh;
   boundsM: [number, number, number];

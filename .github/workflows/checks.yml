@@ -45,6 +45,10 @@ jobs:
         working-directory: desktop
       - run: npm run test:editing-ui
         working-directory: desktop
+      - run: npm run test:navigation
+        working-directory: desktop
+      - run: npm run test:navigation-ui
+        working-directory: desktop
       - run: npm run test:projects
         working-directory: desktop
   # Keep the protected branch's existing required check name while requiring

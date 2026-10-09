@@ -1,0 +1,26 @@
+import { assetIdentity } from "../src/model/assetIdentity";
+import assert from "node:assert/strict";
+import { emptyOrganization, moveToGroup, parseOrganization, rangeSelection } from "../src/model/sceneOrganization";
+import { initialScene } from "../src/model/sceneEditor";
+import { removeSelection } from "../src/model/sceneClipboard";
+import { createDeployProject, parseDeployProject, serializeDeployProject } from "../src/io/deployProject";
+const ids = new Set(["mic1", "mic2"]);
+const organization = { groups: [{ id: "main", name: "Main", members: ["mic1"], collapsed: true }, { id: "other", name: "Other", members: ["mic2"], collapsed: false }] };
+const moved = moveToGroup(organization, ["mic1"], "other");
+assert.deepEqual(moved.groups[0].members, []);
+assert.deepEqual(moved.groups[1].members, ["mic2", "mic1"]);
+assert.deepEqual(parseOrganization(undefined, ids), emptyOrganization());
+assert.throws(() => parseOrganization({ groups: {}, hidden: [], locked: [] }, ids));
+assert.deepEqual(rangeSelection(["mic1", "mic2", "mic3"], "mic3", "mic1"), ["mic1", "mic2", "mic3"]);
+const scene = { ...initialScene(), organization, microphones: [...ids].map(id => ({ id, name: id, positionX: 0, positionHeightM: 1, positionZ: 0 })) };
+const project = createDeployProject("Organized", [], [], scene.channels, [], [], scene.microphones, [], 80, "pattern", scene.heatmapScale, 0, organization);
+assert.deepEqual(parseDeployProject(serializeDeployProject(project)).scene_organization, organization);
+assert.deepEqual(parseDeployProject(JSON.stringify({ ...project, schema_version: 11, scene_organization: undefined })).scene_organization, emptyOrganization());
+const removed = removeSelection(scene, new Set(["mic1"]));
+assert.deepEqual(parseOrganization({ ...organization, hidden: ["mic1"], locked: ["mic2"] }, ids), organization, "Retired flags are discarded on load");
+assert.deepEqual(removed.organization.groups[0].members, []);
+console.log("Scene organization checks passed");
+
+const updatedAssets = [{ id: "package-original", fingerprint: "updated" }];
+assert.equal(assetIdentity("package", "original", updatedAssets), "package-original-2", "An old version does not replace updated instances");
+assert.equal(assetIdentity("package", "updated", updatedAssets), "package-original", "The current content reuses the existing asset");

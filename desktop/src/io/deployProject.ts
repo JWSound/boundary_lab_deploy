@@ -1,3 +1,4 @@
+import { emptyOrganization, parseOrganization, type SceneOrganization } from "../model/sceneOrganization";
 import { validatePlaneSampling } from "../model/planeSampling";
 import { parseEqualizer } from "../model/filters";
 import { planeScale, type PlaneScale } from "../model/planeScale";
@@ -6,18 +7,22 @@ import { createDefaultChannel, DEFAULT_CHANNEL_ID, DEFAULT_SYSTEM_GAIN_DB } from
 import type { DeployChannel, EqualizerConfiguration, Fidelity, LoadedSpeakerPackage, MicrophoneConfiguration, ObservationPlane, AudiencePlane, RigidMeshAsset, RigidMeshConfiguration, SourceConfiguration } from "../model/types";
 
 export const DEPLOY_PROJECT_SCHEMA = "boundary-lab-deploy-project";
-export const DEPLOY_PROJECT_SCHEMA_VERSION = 11;
+export const DEPLOY_PROJECT_SCHEMA_VERSION = 12;
 
 export interface DeployPackageReference {
   id: string;
   name: string;
   source_file: string | null;
+  original_path?: string;
+  fingerprint?: string;
 }
 
 export interface DeployRigidMeshReference {
   id: string;
   name: string;
   source_file: string | null;
+  original_path?: string;
+  fingerprint?: string;
   scale_to_meters: number;
 }
 
@@ -36,6 +41,7 @@ export interface DeployProject {
   system_gain_db: number;
   selected_frequency_hz: number;
   requested_fidelity: Fidelity;
+  scene_organization: SceneOrganization;
 }
 
 function microphoneConfiguration(value: unknown, index: number): MicrophoneConfiguration {
@@ -214,7 +220,7 @@ export function parseDeployProject(contents: string): DeployProject {
   const project = record(raw, "Project");
   if (project.schema !== DEPLOY_PROJECT_SCHEMA) throw new Error("This is not a Boundary Lab Deploy project.");
   const version = finite(project.schema_version, "schema_version");
-  if (version !== 5 && version !== 6 && version !== 7 && version !== 8 && version !== 9 && version !== 10 && version !== DEPLOY_PROJECT_SCHEMA_VERSION) {
+  if (version !== 5 && version !== 6 && version !== 7 && version !== 8 && version !== 9 && version !== 10 && version !== 11 && version !== DEPLOY_PROJECT_SCHEMA_VERSION) {
     throw new Error(`Unsupported Boundary Lab Deploy project schema version ${version}.`);
   }
   if (typeof project.name !== "string" || project.name.trim().length === 0) {
@@ -238,6 +244,8 @@ export function parseDeployProject(contents: string): DeployProject {
       id: packageReference.id,
       name: packageReference.name.trim(),
       source_file: packageReference.source_file,
+      original_path: typeof packageReference.original_path === "string" ? packageReference.original_path : undefined,
+      fingerprint: typeof packageReference.fingerprint === "string" ? packageReference.fingerprint : undefined,
     };
   });
   if (new Set(packages.map((item) => item.id)).size !== packages.length) {
@@ -253,6 +261,8 @@ export function parseDeployProject(contents: string): DeployProject {
       id: reference.id,
       name: reference.name.trim(),
       source_file: reference.source_file,
+      original_path: typeof reference.original_path === "string" ? reference.original_path : undefined,
+      fingerprint: typeof reference.fingerprint === "string" ? reference.fingerprint : undefined,
       scale_to_meters: positive(reference.scale_to_meters, `rigid_meshes[${index}].scale_to_meters`),
     };
   });
@@ -330,6 +340,7 @@ export function parseDeployProject(contents: string): DeployProject {
     system_gain_db: systemGainDb,
     selected_frequency_hz: frequencyHz,
     requested_fidelity: requestedFidelity,
+    scene_organization: parseOrganization(project.scene_organization, new Set([...sources, ...rigidObjects, ...microphones, ...audiencePlanes].map(o => o.id))),
   };
 }
 
@@ -346,16 +357,19 @@ export function createDeployProject(
   requestedFidelity: Fidelity,
   heatmapScale: PlaneScale = planeScale(Array.isArray(observation) ? observation[0] : observation),
   systemGainDb = DEFAULT_SYSTEM_GAIN_DB,
+  organization: SceneOrganization = emptyOrganization(),
 ): DeployProject {
   return {
     schema: DEPLOY_PROJECT_SCHEMA,
     schema_version: DEPLOY_PROJECT_SCHEMA_VERSION,
     name,
-    packages: packages.map((pkg) => ({ id: pkg.id, name: pkg.manifest.name, source_file: pkg.sourcePath })),
+    packages: packages.map((pkg) => ({ id: pkg.id, name: pkg.manifest.name, source_file: pkg.sourcePath, original_path: pkg.originalPath, fingerprint: pkg.fingerprint })),
     rigid_meshes: rigidMeshes.map((asset) => ({
       id: asset.id,
       name: asset.name,
       source_file: asset.sourcePath,
+      original_path: asset.originalPath,
+      fingerprint: asset.fingerprint,
       scale_to_meters: asset.scaleToMeters,
     })),
     channels,
@@ -367,6 +381,7 @@ export function createDeployProject(
     system_gain_db: systemGainDb,
     selected_frequency_hz: selectedFrequencyHz,
     requested_fidelity: requestedFidelity,
+    scene_organization: parseOrganization(organization, new Set([...sources, ...rigidObjects, ...microphones, ...(Array.isArray(observation) ? observation : [{ id: "audience-plane" }])].map(o => o.id))),
   };
 }
 
