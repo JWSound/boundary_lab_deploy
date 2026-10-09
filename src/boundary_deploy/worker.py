@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import os
+import platform
 import sys
 import tempfile
 import threading
@@ -18,8 +19,6 @@ from beat_engine import engine_paths
 from boundary_deploy.acoustic_loading import ACOUSTIC_LOADING_KEYS, normalized_acoustic_loading
 from boundary_deploy.assets import DeploySolveCache
 from boundary_deploy.engine_runtime import (
-    DEFAULT_BEAT_ENGINE_CPU_PROJECT,
-    DEFAULT_BEAT_ENGINE_CUDA_PROJECT,
     DEFAULT_BEAT_ENGINE_SOLVER_SCRIPT,
     BeatEngineWorkerProcess,
 )
@@ -59,9 +58,9 @@ def _emit(event_type: str, *, request_id: object | None = None, **values: Any) -
 
 def _worker(backend: str) -> BeatEngineWorkerProcess:
     normalized = backend.strip().lower()
-    if normalized not in {"cuda", "cpu"}:
-        raise ValueError("Deploy worker backend must be cuda or cpu.")
-    project = DEFAULT_BEAT_ENGINE_CUDA_PROJECT if normalized == "cuda" else DEFAULT_BEAT_ENGINE_CPU_PROJECT
+    if normalized not in {"cuda", "cpu", "metal"}:
+        raise ValueError("Deploy worker backend must be cuda, cpu or metal.")
+    project = engine_paths(normalized).project
     return BeatEngineWorkerProcess(
         julia_executable=os.environ.get("DEPLOY_JULIA_EXE", os.environ.get("BLAB_JULIA_EXE", "julia")),
         solver_script=DEFAULT_BEAT_ENGINE_SOLVER_SCRIPT,
@@ -70,20 +69,41 @@ def _worker(backend: str) -> BeatEngineWorkerProcess:
     )
 
 
+def _check_backend_capability(worker: BeatEngineWorkerProcess, backend: str) -> None:
+    """Check after registration, so cancellation can terminate a starting worker."""
+    if backend == "metal":
+        try:
+            worker.ensure_started()
+            if "metal" not in (worker.worker_info or {}).get("deploy_solver_backends", []):
+                raise RuntimeError("This BEAT Engine does not support Deploy Metal solves. Install a Deploy-Metal-capable engine release or select CPU.")
+        except Exception:
+            worker.terminate()
+            raise
+
+
 def detect_solver_backend() -> str:
-    """Probe the engine's CUDA handshake, not just the presence of a GPU driver."""
+    """Probe the native accelerator's worker handshake before selecting it."""
+    if sys.platform == "darwin":
+        if platform.machine().lower() not in {"arm64", "aarch64"}:
+            return "cpu"
+        accelerator = "metal"
+    else:
+        accelerator = "cuda"
+    paths = engine_paths(accelerator)
     probe = BeatEngineWorkerProcess(
         julia_executable=os.environ.get("DEPLOY_JULIA_EXE", os.environ.get("BLAB_JULIA_EXE", "julia")),
-        solver_script=engine_paths("cuda").system_solver,
+        solver_script=paths.system_solver,
         julia_threads="2",
-        julia_project=DEFAULT_BEAT_ENGINE_CUDA_PROJECT,
+        julia_project=paths.project,
     )
     try:
         probe.ensure_started()
         info = probe.worker_info or {}
-        return "cuda" if info.get("backends", {}).get("cuda", {}).get("available") is True else "cpu"
+        if accelerator == "metal" and "metal" not in info.get("deploy_solver_backends", []):
+            return "cpu"
+        return accelerator if info.get("backends", {}).get(accelerator, {}).get("available") is True else "cpu"
     except Exception as exc:
-        print(f"CUDA availability check failed; using CPU: {exc}", file=sys.stderr)
+        print(f"{accelerator.upper()} availability check failed; using CPU: {exc}", file=sys.stderr)
         return "cpu"
     finally:
         probe.terminate()
@@ -230,6 +250,7 @@ def _solve(
     if worker is None:
         worker = _worker(worker_key)
         workers[worker_key] = worker
+    _check_backend_capability(worker, worker_key)
 
     with tempfile.TemporaryDirectory(prefix="blab-deploy-") as temp_dir:
         prepare_started = time.perf_counter()
@@ -359,6 +380,7 @@ def _microphone_sweep(
     if worker is None:
         worker = _worker(worker_key)
         workers[worker_key] = worker
+    _check_backend_capability(worker, worker_key)
     julia_timing_totals: dict[str, float] = {}
     completed_count = 0
     with tempfile.TemporaryDirectory(prefix="blab-deploy-microphones-") as temp_dir:
@@ -651,6 +673,7 @@ def main() -> int:
                             worker = _worker(worker_key)
                             workers[worker_key] = worker
                         worker.ensure_started()
+                        _check_backend_capability(worker, backend)
                         _emit("completed", request_id=request_id)
                         continue
                     if operation not in {"solve", "microphone_sweep"}:

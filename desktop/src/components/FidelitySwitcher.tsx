@@ -11,7 +11,7 @@ export function FidelitySwitcher({
   coupledUnavailableReason,
 }: {
   value: Fidelity;
-  backend?: "cpu" | "cuda" | null;
+  backend?: "cpu" | "cuda" | "metal" | null;
   onChange: (value: Fidelity) => void;
   packageLevel: number;
   boundaryAvailable: boolean;

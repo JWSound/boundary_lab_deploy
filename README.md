@@ -21,7 +21,8 @@ npm start
 
 Use `npm run dev` for development. Pattern preview needs no Python or Julia solve runtime.
 Boundary/Coupled require Julia and the BEAT Julia environment for the selected backend.
-The desktop currently requests CUDA; it does not automatically fall back to CPU.
+The desktop probes CUDA on Windows/Linux and Metal on Apple Silicon, falling back
+to CPU when the accelerator is unavailable. Preferences retains the selected backend.
 Set `DEPLOY_JULIA_EXE` and optionally `DEPLOY_JULIA_THREADS` if Julia is not on PATH.
 Legacy `BLAB_PYTHON_EXE` / `BLAB_JULIA_EXE` / `BLAB_JULIA_THREADS` remain accepted.
 Prepare the engine runtime explicitly with `.\.venv\Scripts\python.exe -m beat_engine instantiate --backend cuda`
@@ -60,6 +61,10 @@ For an opt-in numerical check, run `.\.venv\Scripts\python.exe scripts/smoke_sol
 This validates two different bundled packages at one common frequency and two pressure probes.
 
 Windows bundle and installer instructions: [distribution guide](docs/distribution.md).
+
+macOS source setup and Metal development qualification: [macOS guide](docs/macos.md).
+The released BEAT 0.3.0 pin does not support Deploy Metal; a qualified engine
+candidate is required until a new engine release is pinned.
 
 ## Contributing and releases
 

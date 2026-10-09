@@ -28,6 +28,9 @@ class DeployWorkerClient {
       cwd: runtime.cwd,
       env: runtime.env,
       windowsHide: true,
+      // Give the Unix worker and Julia descendants their own process group so
+      // closing the application cannot leave a solver running in the background.
+      detached: process.platform !== "win32",
       stdio: ["pipe", "pipe", "pipe"],
     });
     this.readyPromise = new Promise((resolve, reject) => {
@@ -219,6 +222,9 @@ class DeployWorkerClient {
         const result = spawnSync(join(process.env.SystemRoot || "C:\\Windows", "System32", "taskkill.exe"),
           ["/PID", String(this.process.pid), "/T", "/F"], { windowsHide: true, timeout: 10000 });
         if (result.error) console.error("Deploy worker tree cleanup failed", result.error);
+      } else {
+        try { process.kill(-this.process.pid, "SIGTERM"); }
+        catch (error) { if (error.code !== "ESRCH") console.error("Deploy worker tree cleanup failed", error); }
       }
       this.process.kill();
     }

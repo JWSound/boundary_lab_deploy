@@ -103,7 +103,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
   const clipboardPending = useRef(false);
   const browserClipboard = useRef("");
   const [error, setError] = useState<string | null>(null);
-  const [solverBackend, setSolverBackend] = useState<"cpu" | "cuda" | null>(null);
+  const [solverBackend, setSolverBackend] = useState<"cpu" | "cuda" | "metal" | null>(null);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [preferencesSaving, setPreferencesSaving] = useState(false);
   useEffect(() => {
@@ -114,7 +114,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     }).catch(caught => { if (!disposed) setError(String(caught)); });
     return () => { disposed = true; };
   }, []);
-  const changeSolverBackend = async (backend: "cpu" | "cuda") => {
+  const changeSolverBackend = async (backend: "cpu" | "cuda" | "metal") => {
     setPreferencesSaving(true);
     try {
       if (window.boundaryLabDesktop) await window.boundaryLabDesktop.setSolverBackend(backend);

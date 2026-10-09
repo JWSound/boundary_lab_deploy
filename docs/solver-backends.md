@@ -1,8 +1,8 @@
 # Solver backends
 
-Preferences (the top-right settings button) selects CPU or NVIDIA CUDA for Boundary and Coupled solves, microphone sweeps, and audience-plane updates. The choice is saved in `solver-preferences.json` under Electron's user-data directory, independently of projects.
+Preferences (the top-right settings button) selects CPU, NVIDIA CUDA, or Apple Metal for Boundary and Coupled solves, microphone sweeps, and audience-plane updates. The choice is saved in `solver-preferences.json` under Electron's user-data directory, independently of projects. Metal requires an engine candidate with Deploy Metal support; see [macOS development](macos.md).
 
-On first launch, Deploy probes the CUDA engine's versioned worker handshake. It selects CUDA only when the worker reports that CUDA is available; otherwise it selects CPU. Later launches retain the saved choice. Selecting a backend is disabled during a running solve or sweep. Switching backends invalidates the desktop result identity and uses the corresponding engine worker.
+On first launch, Deploy probes the native accelerator's versioned worker handshake: Metal on Apple Silicon, CUDA on Windows/Linux, CPU on Intel Macs. Metal must advertise Deploy solver support as well as a functional device. Unavailable accelerators fall back to CPU. Later launches retain the saved choice. Selecting a backend is disabled during a running solve or sweep. Switching backends invalidates the desktop result identity and uses the corresponding engine worker.
 
 The CPU coupled path uses the exported parity Petrov-Galerkin speaker ROM, the CPU exterior Burton-Miller operators, one exterior LU factorization per frequency, and a host-array GMRES feedback solve. It preserves the same ROM response, phasor convention, field reuse, and sweep warm-start contracts as CUDA.
 

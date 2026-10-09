@@ -73,6 +73,21 @@ app.whenReady().then(async () => {
       assert.ok(after.frames>before.frames, 'Scene change must render: '+code+' '+JSON.stringify({before,after}));
       return after;
     }
+    async function animated(label) {
+      // Virtual macOS runners have variable WebGL frame rates. Require
+      // sustained frame/phase progress in two successive windows, not a
+      // particular number of frames in 250-350 ms.
+      for (let window=0; window<2; window++) {
+        const before=await read();
+        let after=before;
+        for (let attempt=0; attempt<50; attempt++) {
+          await delay(100); after=await read();
+          if (after.frames>before.frames+2 && after.phase!==before.phase) break;
+        }
+        assert.ok(after.frames>before.frames+2 && after.phase!==before.phase,
+          label+' must keep rendering and advancing phase: '+JSON.stringify({before,after}));
+      }
+    }
     const initial=await settled();
     assert.equal(initial.planeHits,0,"Audience heatmaps must not intercept viewport picking rays");
     await delay(500);
@@ -93,16 +108,13 @@ app.whenReady().then(async () => {
     const resized=await settled();
     assert.ok(resized.frames>afterCamera.frames,'Resizing must render');
     await changed('window.updateObservation({displayMode:"real_pressure"})');
-    await update('window.updateScene({phaseAnimationEnabled:true})'); await delay(250);
-    const animationStart=await read(); await delay(350); const animationEnd=await read();
-    assert.ok(animationEnd.frames>animationStart.frames+2,'Phase animation must render continuously');
-    assert.notEqual(animationEnd.phase,animationStart.phase,'Phase must advance');
+    await update('window.updateScene({phaseAnimationEnabled:true})');
+    await animated('Real-pressure animation');
     await changed('window.updateObservation({displayMode:"spl"})');
     await delay(350); const spl=await read(); await delay(350);
     assert.equal((await read()).frames,spl.frames,'SPL must idle even when animation is enabled');
-    await update('window.updateObservation({displayMode:"imag_pressure"})'); await delay(250);
-    const imaginary=await read(); await delay(250);
-    assert.ok((await read()).frames>imaginary.frames+2,'Imaginary-pressure animation must resume');
+    await update('window.updateObservation({displayMode:"imag_pressure"})');
+    await animated('Imaginary-pressure animation');
     await changed('window.updateScene({phaseAnimationEnabled:false})');
     const stopped=await read(); await delay(350);
     assert.equal((await read()).frames,stopped.frames,'Stopping phase animation must restore idle');
