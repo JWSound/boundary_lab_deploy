@@ -39,6 +39,7 @@ function resolveRuntime({ packaged, resourcesPath, dataPath, repositoryRoot, env
   return {
     python,
     logFile: join(logs, "solver.log"),
+    initializationCache: cache,
     cwd: dataPath,
     env: {
       ...clean,
