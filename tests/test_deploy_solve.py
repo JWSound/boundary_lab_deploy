@@ -536,9 +536,10 @@ def test_prepare_deploy_field_request_contains_only_observation_data(tmp_path: P
     assert "proximity" not in request
 
 
-def test_prepare_deploy_cpu_field_request_keeps_explicit_points(tmp_path: Path) -> None:
+@pytest.mark.parametrize("backend", ["cpu", "metal"])
+def test_prepare_deploy_host_field_request_keeps_explicit_points(tmp_path: Path, backend: str) -> None:
     payload = _payload()
-    payload.update({"solutionKey": "cpu-boundary", "backend": "cpu"})
+    payload.update({"solutionKey": "host-boundary", "backend": backend})
 
     _, request = prepare_deploy_field_request(payload, tmp_path)
 
@@ -722,7 +723,7 @@ def test_observation_plane_point_ceiling_keeps_large_valid_grids():
         DeployObservationPlane.from_payload({**raw, "columns": 501})
 
 
-@pytest.mark.parametrize("backend, assembly", [("cpu", "operator_matrices"), ("cuda", "direct_system")])
+@pytest.mark.parametrize("backend, assembly", [("cpu", "operator_matrices"), ("cuda", "direct_system"), ("metal", "operator_matrices")])
 @pytest.mark.parametrize("mixed", [False, True])
 def test_rom_requests_select_backend_assembly(tmp_path, backend, assembly, mixed):
     payload = _payload()
@@ -737,4 +738,4 @@ def test_rom_requests_select_backend_assembly(tmp_path, backend, assembly, mixed
     assert request["beat_engine_backend"] == backend
     assert request["burton_miller_assembly"] == assembly
     assert request["schema"] == "boundary_lab_deploy_rom"
-    assert ("observation_points_m" in request) == (backend == "cpu")
+    assert ("observation_points_m" in request) == (backend != "cuda")
