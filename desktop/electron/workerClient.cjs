@@ -1,11 +1,14 @@
-const { appendFileSync, existsSync, statSync, renameSync, rmSync } = require("node:fs");
+const { appendFileSync, existsSync, statSync, renameSync, rmSync, writeFileSync } = require("node:fs");
 const { spawn, spawnSync } = require("node:child_process");
 const { join } = require("node:path");
 const { performance } = require("node:perf_hooks");
 
 class DeployWorkerClient {
-  constructor(runtimeOptions) {
+  constructor(runtimeOptions, onFirstInitialization = () => {}) {
     this.runtimeOptions = runtimeOptions;
+    this.onFirstInitialization = onFirstInitialization;
+    this.initializationNotices = new Set();
+    this.initializationCache = null;
     this.process = null;
     this.stdoutBuffer = "";
     this.pending = new Map();
@@ -16,9 +19,38 @@ class DeployWorkerClient {
     this.warming = false;
   }
 
+  initializationMarker(backend) {
+    return this.initializationCache && ["cpu", "cuda", "metal"].includes(backend)
+      ? join(this.initializationCache, `initialized-${backend}.json`) : null;
+  }
+
+  beginInitialization(backend, sender) {
+    const marker = this.initializationMarker(backend);
+    if (!marker || existsSync(marker)) return;
+    if (sender && !sender.isDestroyed()) {
+      sender.send("deploy:solve-status", {
+        type: "status", message: `Preparing the ${backend.toUpperCase()} solver for first use. This may take several minutes.`,
+      });
+    }
+    if (this.initializationNotices.has(marker)) return;
+    this.initializationNotices.add(marker);
+    // The dialog is informational; neither dismissal nor display failure blocks setup.
+    try {
+      Promise.resolve(this.onFirstInitialization(backend)).catch(error => console.error("Solver initialization notice failed", error));
+    } catch (error) { console.error("Solver initialization notice failed", error); }
+  }
+
+  completeInitialization(backend) {
+    const marker = this.initializationMarker(backend);
+    if (!marker || existsSync(marker)) return;
+    try { writeFileSync(marker, JSON.stringify({ completedAt: new Date().toISOString() }) + "\n"); }
+    catch (error) { console.error("Could not remember solver initialization", error); }
+  }
+
   ensureStarted() {
     if (this.process && this.readyPromise) return this.readyPromise;
     const runtime = this.runtimeOptions();
+    this.initializationCache = runtime.initializationCache;
     if (runtime.logFile && existsSync(runtime.logFile) && statSync(runtime.logFile).size > 5 * 1024 * 1024) {
       const previous = runtime.logFile + ".previous";
       rmSync(previous, { force: true });
@@ -106,6 +138,9 @@ class DeployWorkerClient {
       job.workerProfile = message.metrics;
     } else if (message.type === "completed") {
       this.pending.delete(message.id);
+      if (job.kind === "warmup" || (job.result && (job.kind !== "backend" || job.result.backend === job.backend))) {
+        this.completeInitialization(job.backend);
+      }
       if (job.kind === "warmup" || job.kind === "cancel") {
         job.resolve(job.kind === "cancel" ? Boolean(message.cancelled) : undefined);
         return;
@@ -162,6 +197,9 @@ class DeployWorkerClient {
       sender.send("deploy:solve-status", { type: "status", message: "Waiting for BEAT solver warmup" });
     }
     await this.ensureStarted();
+    // Backend detection starts Julia too, before the explicit background warmup.
+    const backend = kind === "backend" ? (process.platform === "darwin" ? "metal" : "cuda") : payload.backend;
+    this.beginInitialization(backend, sender);
     const workerReadyWaitMs = performance.now() - invokedAt;
     if (!this.process?.stdin.writable) throw new Error("Deploy solve worker is unavailable.");
     const id = this.nextId++;
@@ -171,6 +209,7 @@ class DeployWorkerClient {
     return new Promise((resolve, reject) => {
       this.pending.set(id, {
         kind,
+        backend,
         resolve,
         reject,
         sender,
@@ -208,12 +247,14 @@ class DeployWorkerClient {
     this.warming = true;
     try {
       await this.ensureStarted();
+      this.beginInitialization(backend);
       if (!this.process?.stdin.writable) throw new Error("Deploy solve worker is unavailable.");
       const id = this.nextId++;
       const request = `${JSON.stringify({ id, operation: "warmup", backend })}\n`;
       return await new Promise((resolve, reject) => {
         this.pending.set(id, {
           kind: "warmup",
+          backend,
           resolve,
           reject,
           sender: null,

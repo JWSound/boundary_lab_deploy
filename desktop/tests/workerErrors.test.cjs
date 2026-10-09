@@ -5,7 +5,7 @@ const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
 const vm = require('node:vm');
 
-function fixture() {
+function fixture(runtime = {}, onFirstInitialization) {
   const children = [];
   const module = { exports: {} };
   const spawn = () => {
@@ -20,7 +20,7 @@ function fixture() {
     module, require: name => name === 'node:child_process' ? { spawn } : require(name),
     process, Buffer, console: { error() {} },
   });
-  return { children, client: new module.exports.DeployWorkerClient(() => ({ python: 'fixture-python', cwd: '.', env: {} })) };
+  return { children, client: new module.exports.DeployWorkerClient(() => ({ python: 'fixture-python', cwd: '.', env: {}, ...runtime }), onFirstInitialization) };
 }
 test('worker startup failure retains stderr emitted after exit and allows a clean retry', async () => {
   const { children, client } = fixture();
@@ -61,4 +61,91 @@ test('an old process cannot clear a restarted worker after a spawn failure', asy
   children[1].stdout.emit('data', '{"type":"ready"}\n');
   await ready;
   assert.equal(client.process, children[1]);
+});
+
+
+const fs = require('node:fs');
+const os = require('node:os');
+function initializationFixture(t) {
+  const cache = fs.mkdtempSync(join(os.tmpdir(), 'deploy-initialization-'));
+  t.after(() => fs.rmSync(cache, { recursive: true, force: true }));
+  const notices = [];
+  const setup = () => fixture({ initializationCache: cache }, backend => {
+    notices.push(backend);
+    return new Promise(() => {}); // Dismissing the notice must not gate warmup.
+  });
+  return { cache, notices, setup };
+}
+async function startWarmup(client, children, backend = 'cuda') {
+  const completed = client.warmup(backend);
+  children.at(-1).stdout.emit('data', '{"type":"ready"}\n');
+  await Promise.resolve();
+  return { completed, id: [...client.pending.keys()].at(-1) };
+}
+
+test('first-use notice does not block warmup and success is remembered per backend', async t => {
+  const { cache, notices, setup } = initializationFixture(t);
+  const { client, children } = setup();
+  const first = await startWarmup(client, children);
+  assert.deepEqual(notices, ['cuda']);
+  assert.equal(fs.existsSync(join(cache, 'initialized-cuda.json')), false);
+  const statuses = [];
+  const solve = client.solve({ backend: 'cuda' }, { isDestroyed: () => false, send: (_channel, value) => statuses.push(value) });
+  await Promise.resolve();
+  assert.match(statuses.at(-1).message, /first use.*several minutes/);
+  assert.deepEqual(notices, ['cuda']);
+  client.handleMessage({ type: 'completed', id: first.id });
+  await first.completed;
+  assert.equal(fs.existsSync(join(cache, 'initialized-cuda.json')), true);
+  const solveId = [...client.pending.keys()][0];
+  client.handleMessage({ type: 'result', id: solveId, result: {} });
+  client.handleMessage({ type: 'completed', id: solveId });
+  await solve;
+  const restarted = setup();
+  const second = await startWarmup(restarted.client, restarted.children);
+  assert.deepEqual(notices, ['cuda']);
+  restarted.client.handleMessage({ type: 'completed', id: second.id });
+  await second.completed;
+  const cpu = await startWarmup(restarted.client, restarted.children, 'cpu');
+  assert.deepEqual(notices, ['cuda', 'cpu']);
+  restarted.client.handleMessage({ type: 'completed', id: cpu.id });
+  await cpu.completed;
+});
+
+test('failed warmup is not recorded and next launch explains first-time setup again', async t => {
+  const { cache, notices, setup } = initializationFixture(t);
+  const first = setup();
+  const job = await startWarmup(first.client, first.children);
+  const rejected = assert.rejects(job.completed, /No CUDA driver/);
+  first.client.handleMessage({ type: 'failed', id: job.id, error: 'No CUDA driver' });
+  await rejected;
+  assert.equal(fs.existsSync(join(cache, 'initialized-cuda.json')), false);
+  const next = setup();
+  const retry = await startWarmup(next.client, next.children);
+  assert.deepEqual(notices, ['cuda', 'cuda']);
+  next.client.handleMessage({ type: 'completed', id: retry.id });
+  await retry.completed;
+});
+
+test('development warmup does not show an installation notice', async () => {
+  const { client, children } = fixture({}, () => assert.fail('Unexpected notice'));
+  const job = await startWarmup(client, children);
+  client.handleMessage({ type: 'completed', id: job.id });
+  await job.completed;
+});
+
+
+test('automatic GPU detection explains compilation before warmup and does not certify a failed probe', async t => {
+  const { cache, notices, setup } = initializationFixture(t);
+  const { client, children } = setup();
+  const detected = client.solve({}, null, 'backend', 'detect_backend');
+  children[0].stdout.emit('data', '{"type":"ready"}\n');
+  await Promise.resolve();
+  const gpu = process.platform === 'darwin' ? 'metal' : 'cuda';
+  assert.deepEqual(notices, [gpu]);
+  const id = [...client.pending.keys()][0];
+  client.handleMessage({ type: 'result', id, result: { backend: 'cpu' } });
+  client.handleMessage({ type: 'completed', id });
+  assert.equal((await detected).backend, 'cpu');
+  assert.equal(fs.existsSync(join(cache, `initialized-${gpu}.json`)), false);
 });

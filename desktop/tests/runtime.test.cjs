@@ -24,6 +24,7 @@ test("bundled runtime ignores development overrides and separates writable files
     assert.ok(config.env.JULIA_DEPOT_PATH.startsWith(dataPath));
     assert.ok(config.env.TEMP.startsWith(dataPath));
     assert.equal(config.cwd, dataPath);
+    assert.equal(config.initializationCache, path.join(dataPath, "runtime", "test"));
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 test("development keeps explicit executable selection", () => {
