@@ -39,6 +39,13 @@ ipcMain.handle("deploy:library-import", async (_event, paths) => {
 const deployWorker = new DeployWorkerClient(() => resolveRuntime({
   packaged: app.isPackaged, resourcesPath: process.resourcesPath,
   dataPath: app.getPath("userData"), repositoryRoot,
+}), backend => dialog.showMessageBox({
+  type: "info",
+  title: "First-time solver setup",
+  message: `Preparing the ${backend.toUpperCase()} solver`,
+  detail: "Boundary Lab Deploy needs to initialize the solver for this installation. This first-time setup may take several minutes. Later starts are usually faster.\n\nSetup continues in the background. You can dismiss this message and keep editing; solves will wait until the solver is ready.",
+  buttons: ["Continue"],
+  noLink: true,
 }));
 
 const solverPreferences = new SolverPreferences(join(app.getPath("userData"), "solver-preferences.json"),
