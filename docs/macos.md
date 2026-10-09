@@ -4,22 +4,18 @@ Deploy's Metal path targets Apple Silicon with macOS 14 or newer, native ARM64
 Python 3.11+, and Julia 1.12. Node/npm are needed to build the Electron desktop.
 Intel Macs can use CPU; they are not a Metal target.
 
-The checked-in BEAT 0.3.0 release pin supports CPU/CUDA Deploy solving, but **does
-not support Deploy Metal**. General BEAT Metal support is insufficient: the
-engine must advertise `deploy_solver_backends` containing `metal`. Automatic
-selection falls back to CPU with an older engine; an explicit Metal selection
-reports that the engine must be updated.
+The checked-in BEAT 0.5.0 wheel supports Deploy Metal and is SHA-256 pinned in
+both `pyproject.toml` and `packaging/runtime-lock.json`. Automatic selection uses
+Metal only when the device is functional and the engine advertises Deploy Metal
+support; otherwise it falls back to CPU.
 
-## Candidate setup
+## Source setup
 
-Use a separate environment for a uniquely versioned BEAT development wheel,
-supplied by the engine project. Keep the published pins in `pyproject.toml` and
-`packaging/runtime-lock.json` until that engine is released and qualified.
+Use a separate native ARM64 environment with the published dependency:
 
 ```sh
 python3 -m venv .tmp/metal-venv
 .tmp/metal-venv/bin/python -m pip install -e '.[dev]'
-.tmp/metal-venv/bin/python -m pip install --no-deps /path/to/beat_engine-CANDIDATE-py3-none-any.whl
 .tmp/metal-venv/bin/python -m beat_engine instantiate --backend cpu
 .tmp/metal-venv/bin/python -m beat_engine instantiate --backend metal
 .tmp/metal-venv/bin/python -m beat_engine doctor --backend metal --threads 2
@@ -45,7 +41,7 @@ speaker velocity/current, and cached audience-plane updates are preserved.
 
 ## Qualification
 
-Run on a real Metal device using the candidate environment:
+Run on a real Metal device using the source environment:
 
 ```sh
 .tmp/metal-venv/bin/python scripts/check_solver_backends.py --backend cpu-metal --output runs/metal-single
@@ -58,7 +54,8 @@ complex pressure, cached field evaluation, two-frequency sweeps, ROM convergence
 and warm starts. The mixed scene places S218BP and SKHORN cabinets 25 mm apart and
 5 mm above ground, and asserts that both direct and ground-image correction pairs
 are exercised. CPU/accelerator relative pressure tolerance remains `5e-4`.
-These runs certify the candidate only, not the published dependency pin.
+BEAT 0.5.0 passed these integration gates on physical Apple M4 hardware before
+publication; rerun them when changing the engine or runtime bundle.
 
 Also run Python tests/lint, the desktop build, and `npm run test:runtime`.
 The engine has a separate Metal near-correction hardware gate and CPU reference
@@ -71,5 +68,5 @@ This is source support. The existing runtime builder and Electron installer
 configuration target Windows. A macOS release still needs a checksum-pinned
 ARM64 Python/Julia bundle, staged CPU/Metal artifacts, platform-specific runtime
 paths, offline relocation checks, macOS signing/notarization, and installed-app
-qualification. Publish a Metal-capable BEAT wheel and update both engine pins
-before certifying a Deploy release.
+qualification. The engine dependency is released and pinned; certify the packaged
+runtime separately before distributing a Deploy release.
