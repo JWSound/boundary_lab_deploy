@@ -1,0 +1,12 @@
+{
+  "extends": "./electron-builder.json",
+  "forceCodeSigning": false,
+  "mac": {
+    "target": [{ "target": "dmg", "arch": ["arm64"] }],
+    "artifactName": "Boundary-Lab-Deploy-${version}-mac-${arch}-unsigned.${ext}",
+    "category": "public.app-category.music",
+    "minimumSystemVersion": "14.0",
+    "identity": null,
+    "notarize": false
+  }
+}

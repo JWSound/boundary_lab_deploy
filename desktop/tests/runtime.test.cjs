@@ -13,7 +13,7 @@ test("bundled runtime ignores development overrides and separates writable files
     }
     fs.writeFileSync(path.join(root, "runtime-manifest.json"), JSON.stringify({ runtime_id: "test" }));
     const dataPath = path.join(root, "User Data");
-    const config = resolveRuntime({ packaged: true, resourcesPath: root, dataPath,
+    const config = resolveRuntime({ packaged: true, resourcesPath: root, dataPath, platform: "win32", arch: "x64",
       env: { PATH: "system", PYTHONPATH: "bad", JULIA_DEPOT_PATH: "bad", JULIA_PROJECT: "bad",
              DEPLOY_PYTHON_EXE: "bad", DEPLOY_JULIA_EXE: "bad", BLAB_JULIA_EXE: "bad" } });
     assert.equal(config.python, path.join(root, "runtime/python/python.exe"));
@@ -49,7 +49,7 @@ test("packaging rejects a stale runtime or mismatched application wheel", async 
     const manifest = { schema_version: 1, files: { payload: "hash" }, components: lock,
       wheels: { "boundary_lab_deploy-0.1.0-py3-none-any.whl": "hash" } };
     const write = () => fs.writeFileSync(path.join(resources, "runtime-manifest.json"), JSON.stringify(manifest));
-    const context = { packager: { projectDir } };
+    const context = { packager: { projectDir }, electronPlatformName: "win32", arch: 1 };
     write();
     await packagingCheck(context);
     assert.equal(context.packager.createTransformerForExtraFiles(), null);
@@ -60,8 +60,44 @@ test("packaging rejects a stale runtime or mismatched application wheel", async 
     manifest.wheels = { "boundary_lab_deploy-0.0.1-py3-none-any.whl": "hash" };
     write();
     await assert.rejects(packagingCheck(context), /wheel version differs/);
+    manifest.wheels = { "boundary_lab_deploy-0.1.0-py3-none-any.whl": "hash" };
+    manifest.platform = "darwin";
+    manifest.arch = "arm64";
+    write();
+    await assert.rejects(packagingCheck(context), /platform differs/);
+    context.electronPlatformName = "darwin";
+    await assert.rejects(packagingCheck(context), /architecture differs/);
+    context.arch = 3;
+    await packagingCheck(context);
   } finally {
     assert.equal(path.dirname(root), path.resolve(os.tmpdir()));
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("macOS runtime uses native paths, isolated overrides and a writable depot", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "deploy-mac-runtime-"));
+  try {
+    for (const file of ["runtime/python/bin/python3", "runtime/julia/bin/julia"]) {
+      fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+      fs.writeFileSync(path.join(root, file), "");
+    }
+    fs.writeFileSync(path.join(root, "runtime-manifest.json"), JSON.stringify({
+      platform: "darwin", arch: "arm64", runtime_id: "mac-test",
+    }));
+    const options = { packaged: true, resourcesPath: root, dataPath: path.join(root, "User Data"),
+      platform: "darwin", arch: "arm64", env: { PYTHONHOME: "bad", DYLD_LIBRARY_PATH: "bad", JULIA_PROJECT: "bad" } };
+    const config = resolveRuntime(options);
+    assert.equal(config.python, path.join(root, "runtime/python/bin/python3"));
+    assert.equal(config.env.DEPLOY_JULIA_EXE, path.join(root, "runtime/julia/bin/julia"));
+    assert.equal(config.env.JULIA_LOAD_PATH, "@:@stdlib");
+    assert.equal(config.env.JULIA_DEPOT_PATH, [path.join(options.dataPath, "runtime/mac-test/julia-depot"),
+      path.join(root, "runtime/julia-depot"), ""].join(":"));
+    assert.equal(config.env.PYTHONHOME, undefined);
+    assert.equal(config.env.DYLD_LIBRARY_PATH, undefined);
+    assert.equal(config.env.JULIA_PROJECT, undefined);
+    assert.ok(config.env.TMPDIR.startsWith(options.dataPath));
+    assert.throws(() => resolveRuntime({ ...options, arch: "x64" }), /does not match/);
+    assert.throws(() => resolveRuntime({ ...options, platform: "win32" }), /does not match/);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

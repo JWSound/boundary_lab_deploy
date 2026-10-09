@@ -1,4 +1,4 @@
-# macOS source development
+# macOS development and unsigned packages
 
 Deploy's Metal path targets Apple Silicon with macOS 14 or newer, native ARM64
 Python 3.11+, and Julia 1.12. Node/npm are needed to build the Electron desktop.
@@ -62,11 +62,58 @@ The engine has a separate Metal near-correction hardware gate and CPU reference
 gate. macOS CI covers Python and desktop behavior; a virtual macOS runner does
 not replace numerical qualification on physical Apple Silicon.
 
-## Distribution still required
+## Unsigned Apple-silicon test package
 
-This is source support. The existing runtime builder and Electron installer
-configuration target Windows. A macOS release still needs a checksum-pinned
-ARM64 Python/Julia bundle, staged CPU/Metal artifacts, platform-specific runtime
-paths, offline relocation checks, macOS signing/notarization, and installed-app
-qualification. The engine dependency is released and pinned; certify the packaged
-runtime separately before distributing a Deploy release.
+The macOS bundle includes checksum-pinned standalone CPython 3.13.16, Julia
+1.12.6, the released BEAT wheel, and CPU/Metal packages and lazy artifacts from a
+clean staging depot. `packaging/runtime-lock.json` records the platform downloads;
+`requirements-macos.txt` pins the Python dependencies. The generated runtime
+manifest records wheel hashes, every resource hash, and relative symlinks.
+No system Python, Julia, Homebrew or developer depot is required by the app.
+
+Build on native Apple silicon with Python 3.12+ and Node 20. The output directory
+must be empty; keep older builds elsewhere instead of overwriting their manifest.
+
+```sh
+.venv/bin/python scripts/build_runtime_macos.py
+cd desktop
+npm ci
+npm run dist:mac:unsigned
+cd ..
+.venv/bin/python scripts/test_installer_macos.py \
+  --dmg release/Boundary-Lab-Deploy-0.1.0-rc.4-mac-arm64-unsigned.dmg \
+  --qualify-backends
+```
+
+Use `npm run pack:mac` for an unpacked `.app`. The DMG is an **unsigned internal
+test artifact**, not a notarized public release. Gatekeeper may block a downloaded
+copy. Do not disable Gatekeeper globally. Intel macOS packaging is not included.
+
+The installer test mounts the DMG read-only, copies the app into a fresh path
+containing spaces, unmounts the image, and launches the packaged renderer and
+worker with invalid development executable overrides. It then performs an offline
+CPU solve with only system utilities on PATH. `--qualify-backends` additionally
+requires a physical Metal device and compares CPU/Metal boundary and coupled/ROM
+solves, cached fields, and warm-start sweeps in the mixed close-ground scene.
+Installed resources must retain their manifest hashes. Test data remains outside
+the `.app`, in `build/Mac Installed Test`; choose another `--destination` for a
+new run. Per-user runtime caches are versioned by the bundle's runtime ID.
+
+The manually dispatched **macOS unsigned candidate** workflow builds a test DMG
+only from a commit with successful main CI. It tests the copied app and offline
+CPU solve, then uploads the DMG, runtime manifest, checksums and reports as Actions
+artifacts. Hosted macOS runners do not qualify physical Metal execution.
+
+## Public distribution still required
+
+Before a public macOS release, configure Developer ID signing and notarization,
+including the bundled Python/Julia native code and JIT entitlements, and establish
+a post-signing resource inventory policy (signing changes Mach-O bytes). The
+unsigned configuration deliberately skips signing and notarization and does not
+publish a GitHub release. A branded app icon and qualification of a quarantined,
+notarized download on a clean Mac also remain. Signed release artifacts must be
+qualified separately; an unsigned test does not establish Gatekeeper acceptance.
+
+Upstream references: [standalone Python distributions](https://github.com/astral-sh/python-build-standalone/releases/tag/20261003),
+[Julia 1.12.6 checksums](https://julialang-s3.julialang.org/bin/checksums/julia-1.12.6.sha256),
+and [electron-builder v26 macOS configuration](https://www.electron.build/v26/docs/mac/).

@@ -8,6 +8,12 @@ module.exports = async (context) => {
   const resources = join(context.packager.projectDir, "../build/resources");
   const manifest = JSON.parse(readFileSync(join(resources, "runtime-manifest.json"), "utf8"));
   if (manifest.schema_version !== 1 || !Object.keys(manifest.files).length) throw new Error("Invalid runtime manifest");
+  if ((manifest.platform || "win32") !== context.electronPlatformName) {
+    throw new Error("Bundled runtime platform differs from the desktop target");
+  }
+  if (manifest.arch && manifest.arch !== ["ia32", "x64", "armv7l", "arm64", "universal"][context.arch]) {
+    throw new Error("Bundled runtime architecture differs from the desktop target");
+  }
   const lock = JSON.parse(readFileSync(join(context.packager.projectDir, "../packaging/runtime-lock.json"), "utf8"));
   if (!isDeepStrictEqual(manifest.components, lock)) {
     throw new Error("Bundled runtime is stale: rebuild it using the current runtime-lock.json");
