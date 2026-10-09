@@ -60,3 +60,8 @@ the installed resources before publishing. The hosted runner does not validate
 CUDA numerical execution. Record its runtime ID, hashes and solve residual.
 
 Offline benchmark and ROM utilities are documented in [developer tools](developer-tools.md).
+
+The Apple-silicon unsigned DMG builder and installed CPU/Metal qualification are
+documented in [macOS packaging](macos.md#unsigned-apple-silicon-test-package).
+The separate `macOS unsigned candidate` workflow produces Actions test artifacts
+from tested main commits. It does not sign, notarize, or publish releases.

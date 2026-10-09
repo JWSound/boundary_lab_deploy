@@ -1,0 +1,57 @@
+name: macOS unsigned candidate
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Existing main commit or tag with successful checks (test artifact only)
+        required: true
+        default: main
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: macos-candidate-${{ inputs.ref }}
+  cancel-in-progress: false
+jobs:
+  macos:
+    runs-on: macos-14
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Require successful CI for the exact main commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/release_tools.py require-ci checks.yml
+      - run: python scripts/build_runtime_macos.py
+      - run: npm ci
+        working-directory: desktop
+      - run: npm run dist:mac:unsigned
+        working-directory: desktop
+      - name: Test the copied DMG app and offline CPU runtime
+        run: python scripts/test_installer_macos.py --dmg release/*-mac-arm64-unsigned.dmg
+      - name: Collect unsigned test artifact and evidence
+        run: |
+          mkdir candidate
+          cp release/*-mac-arm64-unsigned.dmg candidate/
+          cp build/resources/runtime-manifest.json candidate/
+          cp 'build/Mac Installed Test/Smoke Data/packaged-smoke.json' candidate/
+          cp 'build/Mac Installed Test/Runtime Data/verification.json' candidate/
+          python scripts/release_tools.py checksums candidate
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deploy-macos-arm64-unsigned-test
+          path: candidate/*
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: error
