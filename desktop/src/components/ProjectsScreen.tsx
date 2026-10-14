@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { FolderOpen, Plus, Waves, ArrowUpRight } from "lucide-react";
+import { FolderOpen, Plus, ArrowUpRight } from "lucide-react";
 import { parseDeployProject } from "../io/deployProject";
 
 export type ProjectStart = { kind: "new" | "example" } | { kind: "project"; selection: DesktopProjectSelection };
@@ -30,7 +30,7 @@ export function ProjectsScreen({ onStart }: { onStart: (start: ProjectStart) => 
     finally { setOpening(false); }
   };
   return <main className="projects-screen">
-    <header className="projects-brand"><div className="brand-mark"><Waves size={24} /></div><div><strong>Boundary Lab</strong><span>DEPLOY</span></div></header>
+    <header className="projects-brand"><img className="brand-mark" src="./deploy-icon.png" alt="" width={32} height={32} /><div><strong>Boundary Lab</strong><span>DEPLOY</span></div></header>
     <section className="projects-content">
       <div className="projects-heading"><div><h1>Projects</h1></div>
         <div className="projects-actions"><button className="secondary-button" disabled={opening || !window.boundaryLabDesktop} onClick={() => void open()}><FolderOpen size={16} />Open project</button>

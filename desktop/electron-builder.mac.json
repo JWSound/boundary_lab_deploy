@@ -2,6 +2,7 @@
   "extends": "./electron-builder.json",
   "forceCodeSigning": false,
   "mac": {
+    "icon": "assets/deploy.icns",
     "target": [{ "target": "dmg", "arch": ["arm64"] }],
     "artifactName": "Boundary-Lab-Deploy-${version}-mac-${arch}-unsigned.${ext}",
     "category": "public.app-category.music",

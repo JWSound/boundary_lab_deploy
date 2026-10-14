@@ -25,7 +25,6 @@ import {
   SlidersHorizontal,
   Speaker,
   Trash2,
-  Waves,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { SceneView, type FieldTextureProfile, type ObservationResizeUpdate, type SceneTransformMode, type SourceGroupPoseUpdate, type SourcePoseUpdate } from "./components/SceneView";
@@ -2001,7 +2000,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     >
       <header className="topbar">
         <div className="brand">
-          <div className="brand-mark"><Waves size={20} /></div>
+          <img className="brand-mark" src="./deploy-icon.png" alt="" width={32} height={32} />
           <div><strong>Boundary Lab</strong><span>DEPLOY</span></div>
         </div>
         <div className="project-breadcrumb"><button className="text-button" onClick={() => { if (!projectEdited || window.confirm("Return to Projects and discard unsaved changes?")) onProjects(); }}>Projects</button><ChevronRight size={13} /><strong>{projectName}</strong>{projectEdited && <i>Edited</i>}</div>
