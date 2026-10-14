@@ -3,9 +3,10 @@ const { join } = require("node:path");
 const { isDeepStrictEqual } = require("node:util");
 module.exports = async (context) => {
   // electron-builder 26 signs EXEs in extraResources by default. Preserve vendor
-  // signatures and Julia content-addressed artifact trees; sign only the application.
+  // signatures and Julia content-addressed artifact trees during copying. The
+  // signed macOS configuration explicitly signs its copied runtime in afterPack.
   context.packager.createTransformerForExtraFiles = () => null;
-  const resources = join(context.packager.projectDir, "../build/resources");
+  const resources = process.env.DEPLOY_RUNTIME_RESOURCES || join(context.packager.projectDir, "../build/resources");
   const manifest = JSON.parse(readFileSync(join(resources, "runtime-manifest.json"), "utf8"));
   if (manifest.schema_version !== 1 || !Object.keys(manifest.files).length) throw new Error("Invalid runtime manifest");
   if ((manifest.platform || "win32") !== context.electronPlatformName) {

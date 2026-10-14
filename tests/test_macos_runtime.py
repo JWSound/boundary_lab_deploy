@@ -1,5 +1,6 @@
 """Pinned runtime extraction must retain executables without allowing escaping links."""
 
+import hashlib
 import io
 import runpy
 import sys
@@ -7,6 +8,21 @@ import tarfile
 from pathlib import Path
 
 import pytest
+
+
+def test_local_engine_wheel_must_match_release_pin(tmp_path, monkeypatch):
+    scripts = Path(__file__).resolve().parents[1] / "scripts"
+    monkeypatch.syspath_prepend(str(scripts))
+    resolve = runpy.run_path(str(scripts / "build_runtime_macos.py"))["engine_requirement"]
+    wheel = tmp_path / "beat_engine-0.5.1-py3-none-any.whl"
+    wheel.write_bytes(b"candidate wheel")
+    checksum = hashlib.sha256(wheel.read_bytes()).hexdigest()
+    lock = {"beat_requirement": f"beat-engine @ https://example.com/{wheel.name}#sha256={checksum}"}
+    assert resolve(lock) == lock["beat_requirement"]
+    assert resolve(lock, wheel) == wheel.resolve()
+    wheel.write_bytes(b"different candidate")
+    with pytest.raises(ValueError, match="SHA-256"):
+        resolve(lock, wheel)
 
 
 def test_runtime_archive_preserves_modes_and_rejects_escaping_symlinks(tmp_path, monkeypatch):

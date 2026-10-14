@@ -76,6 +76,10 @@ def _check_backend_capability(worker: BeatEngineWorkerProcess, backend: str) -> 
             worker.ensure_started()
             if "metal" not in (worker.worker_info or {}).get("deploy_solver_backends", []):
                 raise RuntimeError("This BEAT Engine does not support Deploy Metal solves. Install a Deploy-Metal-capable engine release or select CPU.")
+            availability = (worker.worker_info or {}).get("backends", {}).get("metal", {})
+            if availability.get("available") is not True:
+                reason = availability.get("reason") or "The worker did not confirm a functional Metal runtime/device."
+                raise RuntimeError(f"Metal solver initialization failed: {reason}")
         except Exception:
             worker.terminate()
             raise

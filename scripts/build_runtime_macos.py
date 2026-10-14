@@ -12,8 +12,22 @@ import sys
 import tarfile
 import uuid
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 from build_runtime import ROOT, digest, download, run
+
+
+def engine_requirement(lock, local_wheel=None):
+    """Allow prepublication qualification only with the exact pinned wheel bytes."""
+    if local_wheel is None:
+        return lock["beat_requirement"]
+    local_wheel = local_wheel.resolve(strict=True)
+    url = lock["beat_requirement"].split(" @ ", 1)[1]
+    parsed = urlparse(url)
+    expected = parse_qs(parsed.fragment).get("sha256", [None])[0]
+    if local_wheel.name != Path(parsed.path).name or not expected or digest(local_wheel) != expected:
+        raise ValueError("Local engine wheel must match the filename and SHA-256 in runtime-lock.json")
+    return local_wheel
 
 
 def extract(archive: Path, destination: Path):
@@ -32,6 +46,7 @@ def extract(archive: Path, destination: Path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=ROOT / "build/resources")
+    parser.add_argument("--engine-wheel", type=Path, help="Local copy of the exact pinned engine wheel for prepublication testing")
     args = parser.parse_args()
     if sys.platform != "darwin" or platform.machine() != "arm64" or sys.version_info < (3, 12):
         parser.error("Build with native ARM64 Python 3.12+ on macOS.")
@@ -63,7 +78,7 @@ def main():
     }
     # Download native wheels using the bundled interpreter, not the build host's ABI.
     run(python, "-I", "-m", "pip", "wheel", "--no-deps", "--wheel-dir", wheels,
-        ROOT, lock["beat_requirement"], env=environment)
+        ROOT, engine_requirement(lock, args.engine_wheel), env=environment)
     run(python, "-I", "-m", "pip", "download", "--only-binary=:all:", "--dest", wheels,
         "-r", ROOT / "packaging/requirements-macos.txt", env=environment)
     run(python, "-I", "-m", "pip", "install", "--no-index", "--no-deps", "--no-compile",
