@@ -25,6 +25,7 @@
   "beforePack": "./electron/packaging-check.cjs",
   "forceCodeSigning": true,
   "win": {
+    "icon": "assets/deploy.ico",
     "target": [
       {
         "target": "nsis",

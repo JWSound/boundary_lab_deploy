@@ -63,6 +63,7 @@ function createWindow() {
     minWidth: 1100,
     minHeight: 720,
     backgroundColor: "#101311",
+    icon: join(here, app.isPackaged ? "../dist/deploy-icon.png" : "../public/deploy-icon.png"),
     show: !packagedSmoke && (!smokeTest || benchmarkLevel2),
     titleBarStyle: "hiddenInset",
     autoHideMenuBar: true,

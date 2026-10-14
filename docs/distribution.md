@@ -28,8 +28,13 @@ unsigned local-test NSIS installer. `npm run dist:win` requires signing credenti
 fails if signing is unavailable. Neither command publishes or configures automatic updates.
 The pinned electron-builder 26 hook preserves signatures and hashes of vendor files in
 extraResources; the application and installer remain the signing targets.
-Unsigned builds skip executable resource editing because its bundled signing tool requires
-Windows symlink privileges. They currently retain the default Electron executable icon.
+Unsigned builds retain executable resource editing so the application icon is embedded.
+The bundled resource/signing tool requires Windows symlink privileges when first extracted
+(enable Windows Developer Mode or build from an elevated terminal).
+
+The application icons are `desktop/assets/deploy.ico` (Windows) and
+`desktop/assets/deploy.icns` (macOS). The renderer and runtime window use
+`desktop/public/deploy-icon.png`, which Vite copies into `dist/` for packaging.
 
 ## Runtime
 
