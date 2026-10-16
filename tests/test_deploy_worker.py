@@ -447,3 +447,34 @@ def test_metal_requires_deploy_capability_not_only_a_functional_device(monkeypat
     with pytest.raises(RuntimeError, match="does not support Deploy Metal"):
         deploy_worker._check_backend_capability(deploy_worker._worker("metal"), "metal")
     assert len(stopped) == 2
+
+
+@pytest.mark.parametrize("availability", [None, {}, {"available": False, "reason": "Metal import failed"}])
+def test_metal_support_without_runtime_readiness_is_rejected(availability):
+    class Worker:
+        worker_info = {"deploy_solver_backends": ["metal"], "backends": {"metal": availability or {}}}
+        stopped = False
+
+        def ensure_started(self):
+            pass
+
+        def terminate(self):
+            self.stopped = True
+
+    worker = Worker()
+    with pytest.raises(RuntimeError, match="Metal solver initialization failed"):
+        deploy_worker._check_backend_capability(worker, "metal")
+    assert worker.stopped
+
+
+def test_metal_ready_worker_is_accepted():
+    class Worker:
+        worker_info = {"deploy_solver_backends": ["metal"], "backends": {"metal": {"available": True}}}
+
+        def ensure_started(self):
+            pass
+
+        def terminate(self):
+            pytest.fail("A ready worker should remain available")
+
+    deploy_worker._check_backend_capability(Worker(), "metal")
