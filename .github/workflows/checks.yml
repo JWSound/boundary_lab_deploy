@@ -39,6 +39,8 @@ jobs:
         working-directory: desktop
       - run: npm run test:runtime
         working-directory: desktop
+      - run: npm run test:windows-signing
+        working-directory: desktop
       - run: npm run test:mac-signing
         working-directory: desktop
       - run: npm run test:viewport-rendering

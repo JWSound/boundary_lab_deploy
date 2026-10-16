@@ -36,6 +36,50 @@ The application icons are `desktop/assets/deploy.ico` (Windows) and
 `desktop/assets/deploy.icns` (macOS). The renderer and runtime window use
 `desktop/public/deploy-icon.png`, which Vite copies into `dist/` for packaging.
 
+## Local Azure signing
+
+`npm run dist:win:azure` signs with an Azure Artifact Signing Public Trust
+certificate profile. This configuration authenticates with Azure CLI only: run
+`az login` as an identity assigned the Artifact Signing Certificate Profile
+Signer role before building. No client secret is required.
+
+Install the Azure CLI, a current Windows SDK SignTool, the x64 Artifact Signing
+client library, and .NET 8 runtime. From the repository root, copy the example
+metadata into the ignored build directory and fill in your account's regional
+endpoint, signing account name, and certificate profile name:
+
+```powershell
+New-Item -ItemType Directory -Path build -Force | Out-Null
+Copy-Item packaging/azure-signing.example.json build/azure-signing.local.json
+```
+
+Keep the credential exclusions in the example to select your Azure CLI login.
+The publisher must exactly match the certificate subject. Configure your local
+paths and publisher before running the signed build:
+
+```powershell
+$env:DEPLOY_AZURE_METADATA = (Resolve-Path build/azure-signing.local.json).Path
+$env:DEPLOY_SIGNING_PUBLISHER = "Your certificate publisher name"
+$env:DEPLOY_SIGNTOOL_EXE = "C:\path\to\x64\signtool.exe"
+$env:DEPLOY_AZURE_DLIB = "C:\path\to\x64\Azure.CodeSigning.Dlib.dll"
+az login
+cd desktop
+npm run dist:win:azure
+```
+
+Set `DEPLOY_RUNTIME_RESOURCES` to an absolute path to a freshly built runtime
+when it is outside `build/resources`. Signed output defaults to
+`release/azure-signed`; override it with `DEPLOY_SIGNED_OUTPUT` if needed.
+Account-specific metadata and publisher values are local configuration and
+must not be committed.
+
+The custom hook signs and timestamps the application, uninstaller, and installer
+with SHA-256 and verifies each signature. The existing packaging hook preserves
+vendor runtime files. Verify the final publisher and timestamp, rerun packaged
+smoke checks, and generate checksums after signing. The existing GitHub release
+workflow still uses certificate credentials; this command is for local Azure
+CLI authentication and does not configure CI authentication.
+
 ## Runtime
 
 Installed launches resolve Python and Julia from `process.resourcesPath`, use isolated UTF-8
