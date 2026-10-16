@@ -1,5 +1,11 @@
-const { existsSync, mkdirSync, readFileSync } = require("node:fs");
+const { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } = require("node:fs");
 const { join } = require("node:path");
+const { tmpdir } = require("node:os");
+
+const scratchDirectories = new Set();
+process.once("exit", () => {
+  for (const directory of scratchDirectories) rmSync(directory, { recursive: true, force: true });
+});
 
 function resolveRuntime({ packaged, resourcesPath, dataPath, repositoryRoot, env = process.env,
                           platform = process.platform, arch = process.arch }) {
@@ -28,7 +34,11 @@ function resolveRuntime({ packaged, resourcesPath, dataPath, repositoryRoot, env
     if (!existsSync(path)) throw new Error(`Installed solver runtime is incomplete: ${path}`);
   }
   const cache = join(dataPath, "runtime", manifest.runtime_id);
-  const temporary = join(dataPath, "tmp");
+  // Julia Downloads precompilation constructs an unescaped file:// URL.
+  // Keep macOS scratch paths free of spaces even when user data contains them.
+  const temporary = windows ? join(dataPath, "tmp")
+    : mkdtempSync(join(/\s/.test(tmpdir()) ? "/tmp" : tmpdir(), "boundary-deploy-"));
+  if (!windows) scratchDirectories.add(temporary);
   const logs = join(dataPath, "logs");
   for (const path of [cache, temporary, logs]) mkdirSync(path, { recursive: true });
   const clean = { ...env };

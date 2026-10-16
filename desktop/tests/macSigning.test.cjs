@@ -57,3 +57,24 @@ test("inventories relative symlinks without following them and rejects escaping 
   fs.symlinkSync(os.tmpdir(), path.join(root, "escape"));
   assert.throws(() => inventory(root), /Escaping/);
 });
+
+test("signed configuration selects only the requested runtime", () => {
+  const previousIdentity = process.env.DEPLOY_MAC_SIGN_IDENTITY;
+  const previousResources = process.env.DEPLOY_RUNTIME_RESOURCES;
+  try {
+    process.env.DEPLOY_MAC_SIGN_IDENTITY = "test-identity";
+    process.env.DEPLOY_RUNTIME_RESOURCES = "/test/replacement-runtime";
+    const config = require("../electron-builder.mac.signed.cjs");
+    assert.equal(config.extends, null);
+    assert.equal(config.extraResources.length, 1);
+    assert.equal(config.extraResources[0].from, "/test/replacement-runtime");
+    assert.equal(config.mac.icon, "assets/deploy.icns");
+    assert.equal(config.beforePack, "./electron/packaging-check.cjs");
+  } finally {
+    for (const [key, value] of [["DEPLOY_MAC_SIGN_IDENTITY", previousIdentity], ["DEPLOY_RUNTIME_RESOURCES", previousResources]]) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    delete require.cache[require.resolve("../electron-builder.mac.signed.cjs")];
+  }
+});

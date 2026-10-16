@@ -111,6 +111,11 @@ new run. Per-user runtime caches are versioned by the bundle's runtime ID.
 The hidden renderer smoke profile suppresses the first-use informational dialog
 so the native modal loop cannot stall automation. Numerical qualification uses a
 separate fresh depot and still exercises first-time solver initialization.
+On macOS, both the app and qualification harness use private system temporary
+directories without spaces: Julia Downloads precompilation constructs an
+unescaped local file URL and fails with a spaced temporary path. Project and
+cache directories still support spaces; temporary scratch directories are removed
+when the hosting process exits normally.
 
 The manually dispatched **macOS unsigned candidate** workflow builds a test DMG
 only from a commit with successful main CI. It tests the copied app and offline
@@ -152,7 +157,10 @@ manifest, signs Mach-O executables/libraries/extensions with secure timestamps,
 and preserves the original manifest as `runtime-manifest-unsigned.json`. The
 replacement manifest inventories signed bytes and records the source runtime ID,
 source manifest digest, identity and signed paths. A new signed runtime ID keeps
-user caches separate. Staged `build/resources` is never modified by signing.
+user caches separate. Staged runtime resources are never modified by signing.
+The signed configuration resolves its parent settings before passing them to
+electron-builder so a custom runtime replaces, rather than appends to, the default
+resource-copy rule.
 Electron then signs its frameworks/helpers and seals the application, skipping
 the already signed runtime so inventory hashes remain valid.
 

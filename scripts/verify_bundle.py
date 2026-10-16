@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import hashlib
 import json
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -71,8 +73,11 @@ def main():
     if user.is_relative_to(app_root):
         parser.error("Test data must be outside the installed resources/app bundle")
     user.mkdir(parents=True, exist_ok=True)
-    temp = user / "tmp"
+    # Match the app: Julia Downloads precompilation cannot use spaced file URLs.
+    temp = user / "tmp" if windows else Path(tempfile.mkdtemp(prefix="boundary-deploy-", dir="/tmp"))
     temp.mkdir(exist_ok=True)
+    if not windows:
+        atexit.register(shutil.rmtree, temp, ignore_errors=True)
     environment = {key: value for key, value in os.environ.items()
                    if not key.upper().startswith(("PYTHON", "JULIA", "DEPLOY_", "BLAB_", "CUDA_PATH", "CUDA_HOME", "DYLD_", "LD_LIBRARY_PATH"))}
     runtime = destination / "runtime"
