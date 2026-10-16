@@ -97,7 +97,12 @@ test("macOS runtime uses native paths, isolated overrides and a writable depot",
     assert.equal(config.env.PYTHONHOME, undefined);
     assert.equal(config.env.DYLD_LIBRARY_PATH, undefined);
     assert.equal(config.env.JULIA_PROJECT, undefined);
-    assert.ok(config.env.TMPDIR.startsWith(options.dataPath));
+    assert.ok(!/\s/.test(config.env.TMPDIR));
+    assert.ok(!config.env.TMPDIR.startsWith(options.dataPath));
+    assert.ok(fs.statSync(config.env.TMPDIR).isDirectory());
+    if (process.platform !== "win32") assert.equal(fs.statSync(config.env.TMPDIR).mode & 0o777, 0o700);
+    assert.equal(config.env.TMP, config.env.TMPDIR);
+    assert.equal(config.env.TEMP, config.env.TMPDIR);
     assert.throws(() => resolveRuntime({ ...options, arch: "x64" }), /does not match/);
     assert.throws(() => resolveRuntime({ ...options, platform: "win32" }), /does not match/);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
