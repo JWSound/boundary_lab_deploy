@@ -63,3 +63,29 @@ const released = constrainCabinetPoses(packages, grid, [grid[3]]);
 assert.deepEqual(released[0].position, grid[3].position);
 
 console.log("cabinet placement regression tests passed");
+
+// Decorative pucks extend beyond the BEM walls in every direction. Placement
+// still permits 10 mm between acoustic walls, and rejects a smaller gap.
+const bemAsset = {
+  ...asset,
+  mesh: {
+    positions: new Float32Array([-0.5, -0.5, -0.5, 0.5, 0.5, 0.5]),
+    indices: new Uint32Array(),
+  },
+  viewportModel: {
+    mesh: {
+      positions: new Float32Array([-0.6, -0.6, -0.6, 0.6, 0.6, 0.6]),
+      indices: new Uint32Array(),
+    },
+  },
+} as BoundaryMeshAsset;
+const bemPackages = new Map([[bemAsset.id, bemAsset]]);
+for (let axis = 0; axis < 3; axis++) {
+  const left = pose("left", 0, 0);
+  const right = pose("right", 0, 0);
+  right.position[axis] = 1.01;
+  assert.deepEqual(cabinetClearanceViolations(bemPackages, [left, right]), []);
+  assert.deepEqual(constrainCabinetPoses(bemPackages, [left, right], [right])[0].position, right.position);
+  right.position[axis] = 1.009;
+  assert.deepEqual(cabinetClearanceViolations(bemPackages, [left, right]), [["left", "right"]]);
+}

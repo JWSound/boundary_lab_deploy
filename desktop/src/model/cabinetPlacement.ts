@@ -26,7 +26,9 @@ export function cabinetLocalBounds(pkg: BoundaryMeshAsset): CabinetLocalBounds {
   if (cached) return cached;
   let minimum: [number, number, number] = [-pkg.boundsM[0] / 2, -pkg.boundsM[2] / 2, -pkg.boundsM[1] / 2];
   let maximum: [number, number, number] = [pkg.boundsM[0] / 2, pkg.boundsM[2] / 2, pkg.boundsM[1] / 2];
-  const mesh = "viewportModel" in pkg && pkg.viewportModel ? pkg.viewportModel.mesh : pkg.mesh;
+  // Clearance and snapping protect the acoustic boundary. Display-only hardware
+  // must not enlarge that boundary; pattern-only packages fall back to the OBJ.
+  const mesh = pkg.mesh ?? ("viewportModel" in pkg ? pkg.viewportModel?.mesh : undefined);
   if (mesh) {
     minimum = [Infinity, Infinity, Infinity];
     maximum = [-Infinity, -Infinity, -Infinity];

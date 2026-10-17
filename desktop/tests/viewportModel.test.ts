@@ -17,7 +17,8 @@ assert.equal((child.material as MeshPhongMaterial).name, "wood");
 const pkg = { viewportModel: model, boundsM: [2, 4, 6], mesh: {
   positions: new Float32Array([0, 0, 4]), indices: new Uint32Array(),
 } } as LoadedSpeakerPackage;
-assert.deepEqual(cabinetLocalBounds(pkg).minimum, [-1, -3, -2]);
+assert.deepEqual(cabinetLocalBounds(pkg).minimum, [0, -4, 0]);
+assert.deepEqual(cabinetLocalBounds({ ...pkg, mesh: null }).minimum, [-1, -3, -2]);
 assert.equal(minimumSourceHeightM(pkg), 4); // Acoustic mesh extends below the visual model.
 pkg.mesh = null;
 assert.equal(minimumSourceHeightM(pkg), 3);
