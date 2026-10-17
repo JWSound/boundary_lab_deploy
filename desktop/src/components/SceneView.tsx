@@ -27,6 +27,7 @@ import {
 } from "three";
 import type { FieldFrame, LoadedSpeakerPackage, MicrophoneConfiguration, ObservationPlane, RigidMeshAsset, SpeakerInstance } from "../model/types";
 import { SOURCE_GROUND_CLEARANCE_M } from "../model/field";
+import { tuneViewportMaterial } from "../model/viewportMaterials";
 import { cabinetClearanceViolations, cabinetLocalBounds, type BoundaryMeshAsset } from "../model/cabinetPlacement";
 import {
   configureAxisOnlyRotation,
@@ -736,14 +737,7 @@ function SpeakerGeometry({
       if (!(child instanceof Mesh)) return;
       const highlight = (material: MeshPhongMaterial) => {
         const copy = material.clone();
-        // Imported matte-black paint often has almost no specular response.
-        // Broad, neutral highlights reveal its shape without lifting diffuse black.
-        if (copy instanceof MeshPhongMaterial
-          && Math.max(copy.color.r, copy.color.g, copy.color.b) < 0.05
-          && Math.max(copy.specular.r, copy.specular.g, copy.specular.b) < 0.05) {
-          copy.specular.set("#505050");
-          copy.shininess = 12;
-        }
+        tuneViewportMaterial(copy);
         if (selected && copy.emissive) copy.emissive.set("#2a3218");
         return copy;
       };
