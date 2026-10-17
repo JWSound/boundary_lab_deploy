@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { Mesh, MeshPhongMaterial } from "three";
+import { Euler, MathUtils, Mesh, MeshPhongMaterial, Quaternion, Vector3 } from "three";
 import { parseViewportModel } from "../src/io/viewportModel";
 import { cabinetLocalBounds } from "../src/model/cabinetPlacement";
 import { minimumSourceHeightM } from "../src/model/field";
@@ -24,8 +24,40 @@ pkg.mesh = null;
 assert.equal(minimumSourceHeightM(pkg), 3);
 const offset = parseViewportModel("v 0 0 -2\nv 1 0 -3\nv 0 1 -2\nf 1 2 3\n");
 const offsetPackage = { ...pkg, viewportModel: offset };
-assert.equal(minimumSourceHeightM(offsetPackage), -2); // Preserve an off-center origin without a fictitious acoustic box.
+assert.equal(minimumSourceHeightM(offsetPackage), 3); // No acoustic mesh: use bounds, ignoring decorative geometry.
 const second = model.object.clone(true);
 second.position.x = 10;
 assert.equal(model.object.position.x, 0);
 console.log("Viewport model transforms, materials, bounds, and ground placement passed.");
+
+// Compare optimized ground clearance with the original full-vector calculation.
+// Include off-center geometry, combined rotations, cache eviction and replacement.
+const referenceHeight = (positions: Float32Array, pitch: number, roll: number) => {
+  const rotation = new Quaternion().setFromEuler(new Euler(
+    MathUtils.degToRad(pitch), 0, MathUtils.degToRad(roll), "YXZ",
+  ));
+  let minimum = Infinity;
+  for (let i = 0; i < positions.length; i += 3) {
+    minimum = Math.min(minimum, new Vector3(positions[i], -positions[i + 2], positions[i + 1]).applyQuaternion(rotation).y);
+  }
+  return -minimum;
+};
+const acoustic = new Float32Array([1, 2, 3, -2, 4, -1, 0.5, -3, 2]);
+const visual = new Float32Array([-3, 1, 2, 2, -4, 5, 1, 2, -2]);
+const testAsset = {
+  ...pkg, mesh: { positions: acoustic, indices: new Uint32Array() },
+  viewportModel: { ...model, mesh: { positions: visual, indices: new Uint32Array() } },
+};
+for (let i = 0; i < 80; i++) {
+  const pitch = i * 7.125 - 180, roll = i * -11.25 + 90;
+  const expected = referenceHeight(acoustic, pitch, roll);
+  assert.ok(Math.abs(minimumSourceHeightM(testAsset, pitch, roll) - expected) < 1e-12);
+  assert.ok(Math.abs(minimumSourceHeightM({ ...testAsset }, pitch, roll) - expected) < 1e-12);
+}
+assert.equal(minimumSourceHeightM(testAsset), 3); // Visual mesh extends to 5, but must not lift the cabinet.
+testAsset.mesh = { positions: new Float32Array([0, 0, 10]), indices: new Uint32Array() };
+assert.equal(minimumSourceHeightM(testAsset), 10);
+const box = { ...pkg, viewportModel: undefined, mesh: null };
+assert.equal(minimumSourceHeightM(box), 3);
+assert.ok(Math.abs(minimumSourceHeightM(box, 90, 0) - 2) < 1e-12);
+console.log("Ground clearance agrees across combined rotations, shared meshes, and mesh replacement.");
