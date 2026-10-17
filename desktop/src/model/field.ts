@@ -283,40 +283,59 @@ export function buildSourceInstance(config: SourceConfiguration): SpeakerInstanc
 
 export const SOURCE_GROUND_CLEARANCE_M = 0;
 
-export function minimumSourceHeightM(pkg: LoadedSpeakerPackage | RigidMeshAsset, pitchDeg = 0, rollDeg = 0): number {
-  if ("viewportModel" in pkg && pkg.viewportModel) {
-    const { viewportModel, ...acoustic } = pkg;
-    const visual = { ...acoustic, mesh: viewportModel.mesh };
-    if (!acoustic.mesh) return minimumSourceHeightM(visual, pitchDeg, rollDeg);
-    return Math.max(minimumSourceHeightM(acoustic, pitchDeg, rollDeg), minimumSourceHeightM(visual, pitchDeg, rollDeg));
+// Imported vertex buffers are immutable. Cache by buffer identity so replacement
+// meshes cannot reuse stale heights, and unloaded assets can be garbage collected.
+// Keep a small bounded history to share calculations across instances/orientations.
+const minimumMeshHeightCache = new WeakMap<Float32Array, Map<string, number>>();
+const MAX_CACHED_HEIGHTS = 32;
+
+function minimumMeshHeightM(positions: Float32Array, pitchDeg: number, rollDeg: number): number {
+  let heights = minimumMeshHeightCache.get(positions);
+  const key = `${pitchDeg},${rollDeg}`;
+  const cached = heights?.get(key);
+  if (cached !== undefined) return cached;
+
+  const q = new Quaternion().setFromEuler(new Euler(
+    MathUtils.degToRad(pitchDeg), 0, MathUtils.degToRad(rollDeg), "YXZ",
+  ));
+  // Only the transformed Y coordinate is needed. Package coordinates map to
+  // scene coordinates (x, -z, y); avoid allocating a Vector3 for every vertex.
+  const yFromX = 2 * (q.x * q.y + q.w * q.z);
+  const yFromY = 1 - 2 * (q.x * q.x + q.z * q.z);
+  const yFromZ = 2 * (q.y * q.z - q.w * q.x);
+  let minimumY = Infinity;
+  for (let index = 0; index < positions.length; index += 3) {
+    minimumY = Math.min(minimumY,
+      yFromX * positions[index] - yFromY * positions[index + 2] + yFromZ * positions[index + 1]);
   }
+  const height = SOURCE_GROUND_CLEARANCE_M - minimumY;
+  if (!heights) {
+    heights = new Map();
+    minimumMeshHeightCache.set(positions, heights);
+  }
+  if (heights.size >= MAX_CACHED_HEIGHTS) heights.delete(heights.keys().next().value!);
+  heights.set(key, height);
+  return height;
+}
+
+export function minimumSourceHeightM(pkg: LoadedSpeakerPackage | RigidMeshAsset, pitchDeg = 0, rollDeg = 0): number {
+  // Ground contact follows the acoustic mesh; decorative viewport geometry is excluded.
+  if (pkg.mesh) return minimumMeshHeightM(pkg.mesh.positions, pitchDeg, rollDeg);
   const rotation = new Quaternion().setFromEuler(new Euler(
     MathUtils.degToRad(pitchDeg),
     0,
     MathUtils.degToRad(rollDeg),
     "YXZ",
   ));
-  if (!pkg.mesh) {
-    let minimumY = Infinity;
-    for (const x of [-pkg.boundsM[0] / 2, pkg.boundsM[0] / 2]) {
-      for (const y of [-pkg.boundsM[2] / 2, pkg.boundsM[2] / 2]) {
-        for (const z of [-pkg.boundsM[1] / 2, pkg.boundsM[1] / 2]) {
-          minimumY = Math.min(minimumY, new Vector3(x, y, z).applyQuaternion(rotation).y);
-        }
+  let minimumY = Infinity;
+  for (const x of [-pkg.boundsM[0] / 2, pkg.boundsM[0] / 2]) {
+    for (const y of [-pkg.boundsM[2] / 2, pkg.boundsM[2] / 2]) {
+      for (const z of [-pkg.boundsM[1] / 2, pkg.boundsM[1] / 2]) {
+        minimumY = Math.min(minimumY, new Vector3(x, y, z).applyQuaternion(rotation).y);
       }
     }
-    return SOURCE_GROUND_CLEARANCE_M - minimumY;
   }
-  let minimumSceneY = Infinity;
-  for (let index = 0; index < pkg.mesh.positions.length; index += 3) {
-    const point = new Vector3(
-      pkg.mesh.positions[index],
-      -pkg.mesh.positions[index + 2],
-      pkg.mesh.positions[index + 1],
-    ).applyQuaternion(rotation);
-    minimumSceneY = Math.min(minimumSceneY, point.y);
-  }
-  return SOURCE_GROUND_CLEARANCE_M - minimumSceneY;
+  return SOURCE_GROUND_CLEARANCE_M - minimumY;
 }
 
 export function nearestFrequencyIndex(pkg: LoadedSpeakerPackage, targetHz: number): number {

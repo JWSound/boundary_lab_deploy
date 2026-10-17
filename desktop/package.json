@@ -6,6 +6,7 @@
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
+    "test:rotation": "esbuild tests/cursorRotation.test.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/cursorRotation.test.mjs && node node_modules/.tmp/cursorRotation.test.mjs",
     "test:filters": "esbuild tests/filters.test.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/filters.test.mjs && node node_modules/.tmp/filters.test.mjs",
     "test:recovery": "node --test tests/projectRecovery.test.cjs && electron tests/projectRecoveryUI.cjs",
     "test:projects": "esbuild tests/projects.test.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/projects.test.mjs && node node_modules/.tmp/projects.test.mjs && node --test tests/recentProjects.test.cjs",

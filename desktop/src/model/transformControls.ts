@@ -1,3 +1,4 @@
+import { installCursorRotation } from "./cursorRotation";
 import { type Camera, Euler, MathUtils, type Group, type Material, Quaternion, Vector3 } from "three";
 
 export interface TransformControlsInternal {
@@ -16,6 +17,7 @@ function normalizedDegrees(value: number): number {
 }
 
 export function configureAxisOnlyRotation(control: unknown): TransformControlsInternal | null {
+  installCursorRotation(control);
   const transform = control as TransformControlsInternal | null;
   const gizmo = transform?._gizmo ?? transform?.gizmo;
   if (!gizmo) return transform;
