@@ -309,7 +309,7 @@ delete legacyProject.observation_plane.displayMode;
 delete legacyProject.observation_plane.pressureScalePa;
 delete legacyProject.observation_plane.phaseAnimationSpeedHz;
 const migratedProject = parseDeployProject(JSON.stringify(legacyProject));
-assert.equal(migratedProject.schema_version, 8);
+assert.equal(migratedProject.schema_version, 12);
 assert.equal(migratedProject.channels[0].id, DEFAULT_CHANNEL_ID);
 assert.equal(migratedProject.audience_planes[0].displayMode, "spl");
 assert.equal(migratedProject.audience_planes[0].pressureScalePa, 10);
