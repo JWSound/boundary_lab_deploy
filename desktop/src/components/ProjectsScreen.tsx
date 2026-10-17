@@ -4,6 +4,7 @@ import { parseDeployProject } from "../io/deployProject";
 
 export type ProjectStart = { kind: "new" | "example" } | { kind: "project"; selection: DesktopProjectSelection };
 export function ProjectsScreen({ onStart }: { onStart: (start: ProjectStart) => void }) {
+  const [recoveries, setRecoveries] = useState<RecoveryProject[]>([]);
   const [recent, setRecent] = useState<RecentProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [opening, setOpening] = useState(false);
@@ -17,6 +18,25 @@ export function ProjectsScreen({ onStart }: { onStart: (start: ProjectStart) => 
     })();
     return () => { active = false; };
   }, []);
+  useEffect(() => {
+    void window.boundaryLabDesktop?.recoveryList?.().then(setRecoveries).catch(() => setError("Could not read recovery copies."));
+  }, []);
+  const recover = async (id: string) => {
+    setOpening(true); setError(null);
+    try {
+      const selection = await window.boundaryLabDesktop?.recoveryOpen?.(id);
+      if (!selection) return;
+      const project = parseDeployProject(selection.contents);
+      if (project.packages.length !== selection.packages.length || project.rigid_meshes.length !== selection.rigidMeshes.length) throw new Error("Required project assets were not located. The recovery copy has been retained.");
+      onStart({ kind: "project", selection });
+    } catch (caught) { setError(String(caught)); }
+    finally { setOpening(false); }
+  };
+  const discard = async (id: string) => {
+    if (!window.confirm("Discard this recovery copy? This cannot be undone.")) return;
+    try { await window.boundaryLabDesktop?.recoveryRemove?.(id); setRecoveries(items => items.filter(item => item.id !== id)); }
+    catch (caught) { setError(String(caught)); }
+  };
   const open = async (path?: string) => {
     setOpening(true); setError(null);
     try {
@@ -37,6 +57,13 @@ export function ProjectsScreen({ onStart }: { onStart: (start: ProjectStart) => 
           <button className="primary-button" disabled={opening} onClick={() => onStart({ kind: "new" })}><Plus size={16} />New</button></div>
       </div>
       {error && <p className="projects-error" role="alert">{error}</p>}
+      {recoveries.length > 0 && <section className="recent-projects" aria-label="Recover unsaved projects">
+        <div className="projects-section-title"><h2>Recover unsaved projects</h2></div>
+        <p>Restore an automatic recovery copy, then save it as a project.</p>
+        <table><thead><tr><th>Project</th><th>Recovery saved</th><th>Actions</th></tr></thead><tbody>{recoveries.map(item => <tr key={item.id}>
+          <td>{item.name}</td><td>{new Date(item.updatedAt).toLocaleString()}</td><td><button className="secondary-button" disabled={opening} onClick={() => void recover(item.id)}>Restore</button> <button className="text-button" disabled={opening} onClick={() => void discard(item.id)}>Discard</button></td>
+        </tr>)}</tbody></table>
+      </section>}
       <section className="recent-projects" aria-label="Recent projects"><div className="projects-section-title"><h2>Recent projects</h2></div>
         {loading ? <p className="projects-empty">Loading recent projects...</p> : recent.length === 0 ? <div className="projects-empty"><FolderOpen size={28}/><p>No recent projects yet.</p><span>Projects you open or save will appear here.</span></div> :
           <table><thead><tr><th>Project / file path</th><th>Last modified</th><th><span className="sr-only">Open</span></th></tr></thead><tbody>{recent.map(project => <tr key={project.path}>

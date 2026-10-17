@@ -778,6 +778,15 @@ ipcMain.handle("deploy:open-rigid-mesh", async () => {
   return readPackageSelection(selection.filePaths[0]);
 });
 
+const { projectRecovery, atomicWrite } = require("./projectRecovery.cjs");
+const recovery = projectRecovery(join(app.getPath("userData"), "recovery"));
+ipcMain.handle("deploy:recovery-list", () => recovery.list());
+ipcMain.handle("deploy:recovery-write", (_event, id, contents) => recovery.write(id, contents));
+ipcMain.handle("deploy:recovery-remove", (_event, id) => recovery.remove(id));
+ipcMain.handle("deploy:recovery-open", async (_event, id) => {
+  if (!(await recovery.list()).some(item => item.id === id)) throw new Error("Recovery copy unavailable.");
+  return { ...await readProjectSelection(recovery.pathFor(id)), recoveryId: id, name: "recovered.blabdeploy.json" };
+});
 ipcMain.handle("deploy:recent-projects", () => recentProjects.list());
 ipcMain.handle("deploy:remember-project", async (_event, path, name) => {
   if (typeof path !== "string" || !isAbsolute(path) || typeof name !== "string") throw new Error("Invalid project reference.");
@@ -795,7 +804,10 @@ ipcMain.handle("deploy:open-project", async (_event, recentPath) => {
     properties: ["openFile"],
   });
   if (selection.canceled || selection.filePaths.length === 0) return null;
-  const projectPath = selection.filePaths[0];
+  return readProjectSelection(selection.filePaths[0]);
+});
+
+async function readProjectSelection(projectPath) {
   const contents = await readFile(projectPath, "utf8");
   let project;
   try {
@@ -872,7 +884,7 @@ ipcMain.handle("deploy:open-project", async (_event, recentPath) => {
     rigidMeshes.push(meshResult);
   }
   return { name: basename(projectPath), path: projectPath, contents, packages, rigidMeshes };
-});
+}
 
 ipcMain.handle("deploy:save-project", async (_event, contents, suggestedName) => {
   const selection = await dialog.showSaveDialog({
@@ -884,7 +896,7 @@ ipcMain.handle("deploy:save-project", async (_event, contents, suggestedName) =>
     ],
   });
   if (selection.canceled || !selection.filePath) return null;
-  await writeFile(selection.filePath, contents, "utf8");
+  await atomicWrite(selection.filePath, contents);
   // Recent-list persistence must not turn a successful save into a failed save.
   await recentProjects.remember(selection.filePath, JSON.parse(contents).name).catch(error => console.warn("Could not update recent projects", error));
   return selection.filePath;
@@ -906,4 +918,11 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-app.on("before-quit", () => deployWorker.close());
+let recoveryFlushed = false;
+app.on("before-quit", event => {
+  deployWorker.close();
+  if (!recoveryFlushed) {
+    event.preventDefault();
+    void recovery.flush().finally(() => { recoveryFlushed = true; app.quit(); });
+  }
+});

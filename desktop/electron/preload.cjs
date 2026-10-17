@@ -1,6 +1,10 @@
 const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("boundaryLabDesktop", {
+  recoveryList: () => ipcRenderer.invoke("deploy:recovery-list"),
+  recoveryWrite: (id, contents) => ipcRenderer.invoke("deploy:recovery-write", id, contents),
+  recoveryRemove: id => ipcRenderer.invoke("deploy:recovery-remove", id),
+  recoveryOpen: id => ipcRenderer.invoke("deploy:recovery-open", id),
   getDroppedFilePath: file => webUtils.getPathForFile(file),
   scanLibrary: () => ipcRenderer.invoke("deploy:library-scan"),
   libraryFolder: action => ipcRenderer.invoke("deploy:library-folder", action),

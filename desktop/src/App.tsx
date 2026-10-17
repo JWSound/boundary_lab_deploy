@@ -1,3 +1,4 @@
+import { useProjectRecovery } from "./io/useProjectRecovery";
 import { assetIdentity } from "./model/assetIdentity";
 import { estimateSolverComplexity } from "./model/solverComplexity";
 import { SolverComplexityReadout } from "./components/SolverComplexityReadout";
@@ -174,6 +175,8 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
   const [liveSolveEnabled, setLiveSolveEnabled] = useState(false);
   const [transformMode, setTransformMode] = useState<SceneTransformMode>("select");
   const [angleSnapDisabled, setAngleSnapDisabled] = useState(false);
+  const [recoveryId, setRecoveryId] = useState<string>(crypto.randomUUID());
+  const [recoveryReady, setRecoveryReady] = useState(false);
   const [projectFileName, setProjectFileName] = useState("untitled.blabdeploy.json");
   const [savedProjectSnapshot, setSavedProjectSnapshot] = useState<string | null>(null);
   const [solveReleaseRevision, setSolveReleaseRevision] = useState(0);
@@ -502,7 +505,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
       if (speakerMatches(id, false)) speakerElectrical.traces.set(`${capture.id}:${id}`, { ...trace, name: `${capture.name} / ${trace.name}`, frequenciesHz: capture.electrical.frequenciesHz });
     }
   }
-  const currentProjectContents = serializeDeployProject(createDeployProject(
+  const currentProjectContents = useMemo(() => serializeDeployProject(createDeployProject(
     projectName,
     packages,
     rigidMeshes,
@@ -516,8 +519,10 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     heatmapScale,
     systemGainDb,
     organization,
-  ));
+    captures, [...visibleCaptureIds],
+  )), [projectName, packages, rigidMeshes, channels, sourceConfigs, rigidObjects, microphones, audiencePlanes, frequenciesHz, frequencyIndex, fidelity, heatmapScale, systemGainDb, organization, captures, visibleCaptureIds]);
   const projectEdited = savedProjectSnapshot === null || savedProjectSnapshot !== currentProjectContents;
+  const recoveryStatus = useProjectRecovery(recoveryId, currentProjectContents, projectEdited, recoveryReady);
   const captureCurrentAnalysis = () => {
     const id = crypto.randomUUID();
     const raw: AnalysisCapture["raw"] = {};
@@ -527,7 +532,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     }
     const capture = captureAnalysis({
       id, name: captureName.trim() || `Capture ${captures.length + 1}`, createdAt: new Date().toISOString(),
-      project: currentProjectContents, pattern: microphonePatternResponses,
+      project: serializeDeployProject({ ...parseDeployProject(currentProjectContents), analysis_captures: [], visible_capture_ids: [] }), pattern: microphonePatternResponses,
       boundary: raw.boundary ? currentBoundaryResponses : null,
       coupled: raw.coupled ? currentCoupledResponses : null,
       excursion: raw.coupled ? currentDriverExcursion : null,
@@ -670,6 +675,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
       project.heatmap_scale,
       project.system_gain_db,
       project.scene_organization,
+      project.analysis_captures, project.visible_capture_ids,
     ));
     editor.set("organization", project.scene_organization);
     setPackages(nextPackages);
@@ -704,11 +710,13 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     setElectricalResponse(null);
     setAcousticResponse(null);
     setRawSweeps({}); setResponseHistory({}); setRetainedExcursion(null); setRetainedElectrical(null);
-    setCaptures([]); setVisibleCaptureIds(new Set());
+    setCaptures(project.analysis_captures); setVisibleCaptureIds(new Set(project.visible_capture_ids));
     setTransformMode("select");
     setProjectName(project.name);
     setProjectFileName(fileName);
     setSavedProjectSnapshot(normalizedContents);
+    setRecoveryId(crypto.randomUUID());
+    setRecoveryReady(true);
     setError(clearanceViolations.length > 0
       ? `Loaded project contains ${clearanceViolations.length} speaker clearance violation${clearanceViolations.length === 1 ? "" : "s"}. Move the affected cabinets apart before placing them closer together.`
       : null);
@@ -848,7 +856,10 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
       return { ...loaded, id: reference.id, name: reference.name, originalPath: reference.original_path ?? item.originalPath, fingerprint: reference.fingerprint ?? item.fingerprint };
     });
     applyProject(project, nextPackages, nextRigidMeshes, selection.name);
-    void window.boundaryLabDesktop?.rememberProject(selection.path, project.name).catch(() => {});
+    if (selection.recoveryId) {
+      setRecoveryId(selection.recoveryId);
+      setSavedProjectSnapshot(null);
+    } else void window.boundaryLabDesktop?.rememberProject(selection.path, project.name).catch(() => {});
   };
   useEffect(() => {
     let active = true;
@@ -861,15 +872,25 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
           if (!active) return;
           if (window.boundaryLabDesktop && !selection) throw new Error("The bundled S218BP example could not be found.");
           initializePackage(selection ? { ...loadSpeakerPackage(selection.bytes, selection.name, selection.path), originalPath: selection.originalPath, fingerprint: selection.fingerprint } : createDemoPackage());
+          setRecoveryReady(true);
         } catch (caught) { if (active) setError(String(caught)); }
       })();
-    } else { setSavedProjectSnapshot(currentProjectContents); }
+    } else { setSavedProjectSnapshot(currentProjectContents); setRecoveryReady(true); }
     return () => {
       active = false;
       solveGeneration.current++; sweepGeneration.current++; microphoneSweepKeyRef.current = null;
       void window.boundaryLabDesktop?.cancelMicrophoneSweep().catch(() => {});
     };
   }, []);
+
+  const leaveProject = async () => {
+    if (projectEdited && !window.confirm("Return to Projects and discard unsaved changes?")) return;
+    setRecoveryReady(false);
+    try {
+      await window.boundaryLabDesktop?.recoveryRemove?.(recoveryId);
+      onProjects();
+    } catch { setRecoveryReady(true); setError("Could not discard the recovery copy. Please try again."); }
+  };
 
   const openProject = async () => {
     try {
@@ -878,6 +899,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
         const selection = await window.boundaryLabDesktop.openProject();
         if (!selection) return;
         applyDesktopSelection(selection);
+        await window.boundaryLabDesktop.recoveryRemove?.(recoveryId);
       } else {
         projectFileInput.current?.click();
       }
@@ -2063,7 +2085,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
           <img className="brand-mark" src="./deploy-icon.png" alt="" width={32} height={32} />
           <div><strong>Boundary Lab</strong><span>DEPLOY</span></div>
         </div>
-        <div className="project-breadcrumb"><button className="text-button" onClick={() => { if (!projectEdited || window.confirm("Return to Projects and discard unsaved changes?")) onProjects(); }}>Projects</button><ChevronRight size={13} /><ProjectName name={projectName} onRename={name => { editor.end(); setProjectName(name); }} />{projectEdited && <i>Edited</i>}</div>
+        <div className="project-breadcrumb"><button className="text-button" onClick={() => void leaveProject()}>Projects</button><ChevronRight size={13} /><ProjectName name={projectName} onRename={name => { editor.end(); setProjectName(name); }} />{projectEdited && <i>Edited</i>}{recoveryStatus && <small role="status" title="Automatic recovery copy; use Save to update your project file.">{recoveryStatus}</small>}</div>
         <FidelitySwitcher
           backend={solverBackend}
           value={fidelity}
