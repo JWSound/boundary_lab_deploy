@@ -51,7 +51,7 @@ export function AssetBrowser(props: Props) {
   const rows = assets.filter(a => (location !== "all" || a.location === "project" || !props.projectAssets.some(p => p.fingerprint === a.fingerprint && p.originalPath === a.path)) && a.kind === kind && (location === "all" || a.location === location) &&
     (!onlyFavorites || favorites.includes(a.originalPath ?? a.path ?? a.key)) && `${a.name} ${a.fileName}`.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => sort === "recent" ? (recent.indexOf(assetKey(a)) < 0 ? Infinity : recent.indexOf(assetKey(a))) - (recent.indexOf(assetKey(b)) < 0 ? Infinity : recent.indexOf(assetKey(b))) || a.name.localeCompare(b.name) : a.name.localeCompare(b.name));
-  const firstRow = rows.length > 100 ? Math.max(0, Math.floor(scrollTop / 46) - 10) : 0;
+  const firstRow = rows.length > 100 ? Math.max(0, Math.floor(scrollTop / 56) - 10) : 0;
   const visibleRows = rows.length > 100 ? rows.slice(firstRow, firstRow + 50) : rows;
   const detail = assets.find(a => a.key === selected);
   const replacement = detail?.location === "project" ? snapshot.entries.find(e => e.path === detail.originalPath && e.fingerprint !== detail.fingerprint) : undefined;
@@ -85,7 +85,7 @@ export function AssetBrowser(props: Props) {
       <div className="navigator-search"><input aria-label="Search assets" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search assets…" /><button title="Show favorites" aria-label="Show favorites" aria-pressed={onlyFavorites} onClick={() => setOnlyFavorites(!onlyFavorites)}><Star size={14} fill={onlyFavorites ? "currentColor" : "none"} /></button></div>
       <div className="asset-filters"><select aria-label="Asset location" value={location} onChange={e => setLocation(e.target.value)}><option value="all">All locations</option><option value="library">My library</option><option value="project">Project assets</option><option value="builtin">Built-in</option></select><select aria-label="Sort assets" value={sort} onChange={e => setSort(e.target.value)}><option value="name">Name</option><option value="recent">Recently used</option></select></div>
       <div key={`${kind}:${location}:${search}:${onlyFavorites}:${sort}`} className="asset-list" onScroll={e => setScrollTop(e.currentTarget.scrollTop)} role="list" aria-label={kind === "speaker" ? "Speaker library" : "Rigid mesh library"}>
-        {firstRow > 0 && <div aria-hidden="true" style={{ height: firstRow * 46 }} />}
+        {firstRow > 0 && <div aria-hidden="true" style={{ height: firstRow * 56 }} />}
         {visibleRows.map(asset => {
           const Icon = asset.kind === "speaker" ? Speaker : Box;
           const favoriteKey = asset.originalPath ?? asset.path ?? asset.key;
@@ -98,7 +98,7 @@ export function AssetBrowser(props: Props) {
             <button className="row-control" disabled={busy || Boolean(asset.error)} title={`Add ${asset.name} to scene`} aria-label={`Add ${asset.name} to scene`} onClick={() => void add(asset)}><Plus size={15} /></button>
           </div>;
         })}
-        {rows.length > firstRow + visibleRows.length && <div aria-hidden="true" style={{ height: (rows.length - firstRow - visibleRows.length) * 46 }} />}
+        {rows.length > firstRow + visibleRows.length && <div aria-hidden="true" style={{ height: (rows.length - firstRow - visibleRows.length) * 56 }} />}
         {!rows.length && <p className="navigator-empty">{search || onlyFavorites ? "No matching assets." : desktop ? "Drop .blabsp packages or .msh meshes here, or import files to your library." : "Add a speaker package or rigid mesh from a file. Folder libraries are available in the desktop app."}</p>}
       </div>
       {detail && <details className="asset-details" open><summary>{detail.name}</summary><p>{detail.fileName}</p><p title={detail.originalPath ?? detail.path ?? "Browser file"}>{detail.originalPath ?? detail.path ?? "Browser file"}</p>

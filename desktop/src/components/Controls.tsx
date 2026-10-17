@@ -2,7 +2,7 @@ import { withPlaneDensity } from "../model/planeSampling";
 import type { LucideIcon } from "lucide-react";
 import { Box, CircleDot, Grid3X3, Palette, Plus, Radio, Speaker, SlidersHorizontal, Trash2 } from "lucide-react";
 import type { ChangeEvent, ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type {
   MicrophoneConfiguration,
   ObservationPlane,
@@ -31,13 +31,13 @@ export function RigidMeshInspector({
   return (
     <>
       <SectionHeader icon={Box} title="Placement" />
-      <div className="inspector-section two-column-fields">
-        <NumberField label="X" value={config.positionX} unit="m" step={0.1} onChange={(value) => set("positionX", value)} />
-        <NumberField label="Height" value={config.positionHeightM} unit="m" step={0.1} minimum={0} onChange={(value) => set("positionHeightM", value)} />
-        <NumberField label="Depth" value={config.positionZ} unit="m" step={0.1} onChange={(value) => set("positionZ", value)} />
-        <NumberField label="Pitch" value={config.pitchDeg} unit="deg" step={0.5} onChange={(value) => set("pitchDeg", value)} />
-        <NumberField label="Yaw" value={config.yawDeg} unit="deg" step={0.5} onChange={(value) => set("yawDeg", value)} />
-        <NumberField label="Roll" value={config.rollDeg} unit="deg" step={0.5} onChange={(value) => set("rollDeg", value)} />
+      <div className="inspector-section placement-fields">
+        <NumberField label="X" value={config.positionX} unit="m" precision={2} step={0.1} onChange={(value) => set("positionX", value)} />
+        <NumberField label="Y" value={config.positionHeightM} unit="m" precision={2} step={0.1} minimum={0} onChange={(value) => set("positionHeightM", value)} />
+        <NumberField label="Z" value={config.positionZ} unit="m" precision={2} step={0.1} onChange={(value) => set("positionZ", value)} />
+        <NumberField label="Pitch" value={config.pitchDeg} unit="°" precision={0} step={1} onChange={(value) => set("pitchDeg", value)} />
+        <NumberField label="Yaw" value={config.yawDeg} unit="°" precision={0} step={1} onChange={(value) => set("yawDeg", value)} />
+        <NumberField label="Roll" value={config.rollDeg} unit="°" precision={0} step={1} onChange={(value) => set("rollDeg", value)} />
       </div>
     </>
   );
@@ -56,10 +56,10 @@ export function MicrophoneInspector({
   return (
     <>
       <SectionHeader icon={CircleDot} title="Placement" />
-      <div className="inspector-section two-column-fields">
-        <NumberField label="X" value={config.positionX} unit="m" step={0.1} onChange={(value) => set("positionX", value)} />
-        <NumberField label="Height" value={config.positionHeightM} unit="m" step={0.1} minimum={0} onChange={(value) => set("positionHeightM", value)} />
-        <NumberField label="Depth" value={config.positionZ} unit="m" step={0.1} onChange={(value) => set("positionZ", value)} />
+      <div className="inspector-section placement-fields">
+        <NumberField label="X" value={config.positionX} unit="m" precision={2} step={0.1} onChange={(value) => set("positionX", value)} />
+        <NumberField label="Y" value={config.positionHeightM} unit="m" precision={2} step={0.1} minimum={0} onChange={(value) => set("positionHeightM", value)} />
+        <NumberField label="Z" value={config.positionZ} unit="m" precision={2} step={0.1} onChange={(value) => set("positionZ", value)} />
       </div>
     </>
   );
@@ -126,6 +126,7 @@ export function NumberField({
   step,
   minimum,
   maximum,
+  precision,
   onChange,
 }: {
   label: string;
@@ -134,9 +135,45 @@ export function NumberField({
   step: number;
   minimum?: number;
   maximum?: number;
+  precision?: number;
   onChange: (value: number) => void;
 }) {
+  const id = useId();
+  const [draft, setDraft] = useState<string | null>(null);
   const constrained = (next: number) => Math.min(maximum ?? Infinity, Math.max(minimum ?? -Infinity, next));
+  if (precision !== undefined) {
+    // Formatting alone must not round stored poses (including ground clearance).
+    const formatted = Number(value.toFixed(precision)).toFixed(precision);
+    const adjust = (direction: number) => {
+      const next = Number((Number(formatted) + direction * step).toFixed(precision));
+      setDraft(null);
+      onChange(constrained(next));
+    };
+    return <div className="control-row placement-row">
+      <label htmlFor={id}>{label}</label>
+      <div className="placement-input">
+        <button type="button" aria-label={`Decrease ${label}`} title={`Decrease ${label} by ${step} ${unit}`}
+          disabled={minimum !== undefined && value <= minimum} onClick={() => adjust(-1)}>−</button>
+        <input id={id} aria-label={label} type="number" value={draft ?? formatted} min={minimum} max={maximum} step={step}
+          onChange={(event) => {
+            const text = event.target.value;
+            setDraft(text);
+            if (text.trim() !== "" && Number.isFinite(Number(text))) onChange(constrained(Number(text)));
+          }}
+          onBlur={() => setDraft(null)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+            if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+              event.preventDefault();
+              adjust(event.key === "ArrowUp" ? 1 : -1);
+            }
+          }} />
+        <em>{unit}</em>
+        <button type="button" aria-label={`Increase ${label}`} title={`Increase ${label} by ${step} ${unit}`}
+          disabled={maximum !== undefined && value >= maximum} onClick={() => adjust(1)}>+</button>
+      </div>
+    </div>;
+  }
   return (
     <label className="control-row number-row">
       <span>{label}</span>
@@ -162,13 +199,13 @@ export function SourceInspector({
   return (
     <>
       <SectionHeader icon={CircleDot} title="Placement" />
-      <div className="inspector-section two-column-fields">
-        <NumberField label="X" value={config.positionX} unit="m" step={0.1} onChange={(value) => set("positionX", value)} />
-        <NumberField label="Height" value={config.positionHeightM} unit="m" step={0.1} minimum={minimumHeightM} onChange={(value) => set("positionHeightM", value)} />
-        <NumberField label="Depth" value={config.positionZ} unit="m" step={0.1} onChange={(value) => set("positionZ", value)} />
-        <NumberField label="Pitch" value={config.pitchDeg} unit="deg" step={0.5} onChange={(value) => set("pitchDeg", value)} />
-        <NumberField label="Yaw" value={config.yawDeg} unit="°" step={0.5} onChange={(value) => set("yawDeg", value)} />
-        <NumberField label="Roll" value={config.rollDeg} unit="deg" step={0.5} onChange={(value) => set("rollDeg", value)} />
+      <div className="inspector-section placement-fields">
+        <NumberField label="X" value={config.positionX} unit="m" precision={2} step={0.1} onChange={(value) => set("positionX", value)} />
+        <NumberField label="Y" value={config.positionHeightM} unit="m" precision={2} step={0.1} minimum={minimumHeightM} onChange={(value) => set("positionHeightM", value)} />
+        <NumberField label="Z" value={config.positionZ} unit="m" precision={2} step={0.1} onChange={(value) => set("positionZ", value)} />
+        <NumberField label="Pitch" value={config.pitchDeg} unit="°" precision={0} step={1} onChange={(value) => set("pitchDeg", value)} />
+        <NumberField label="Yaw" value={config.yawDeg} unit="°" precision={0} step={1} onChange={(value) => set("yawDeg", value)} />
+        <NumberField label="Roll" value={config.rollDeg} unit="°" precision={0} step={1} onChange={(value) => set("rollDeg", value)} />
       </div>
       <SectionHeader icon={Radio} title="Speaker processing" />
       <div className="inspector-section">
@@ -289,13 +326,13 @@ export function PlaneResolutionInspector({
         </label>
       </div>
       <SectionHeader icon={CircleDot} title="Placement" />
-      <div className="inspector-section two-column-fields">
-        <NumberField label="X" value={value.centerXM} unit="m" step={0.1} onChange={(next) => set("centerXM", next)} />
-        <NumberField label="Near" value={value.nearM} unit="m" step={0.1} onChange={(next) => set("nearM", next)} />
-        <NumberField label="Height" value={value.heightM} unit="m" step={0.1} onChange={(next) => set("heightM", next)} />
-        <NumberField label="Pitch" value={value.pitchDeg} unit="deg" step={0.5} onChange={(next) => set("pitchDeg", next)} />
-        <NumberField label="Yaw" value={value.yawDeg} unit="°" step={0.5} onChange={(next) => set("yawDeg", next)} />
-        <NumberField label="Roll" value={value.rollDeg} unit="deg" step={0.5} onChange={(next) => set("rollDeg", next)} />
+      <div className="inspector-section placement-fields">
+        <NumberField label="X" value={value.centerXM} unit="m" precision={2} step={0.1} onChange={(next) => set("centerXM", next)} />
+        <NumberField label="Y" value={value.heightM} unit="m" precision={2} step={0.1} onChange={(next) => set("heightM", next)} />
+        <NumberField label="Z" value={value.nearM} unit="m" precision={2} step={0.1} onChange={(next) => set("nearM", next)} />
+        <NumberField label="Pitch" value={value.pitchDeg} unit="°" precision={0} step={1} onChange={(next) => set("pitchDeg", next)} />
+        <NumberField label="Yaw" value={value.yawDeg} unit="°" precision={0} step={1} onChange={(next) => set("yawDeg", next)} />
+        <NumberField label="Roll" value={value.rollDeg} unit="°" precision={0} step={1} onChange={(next) => set("rollDeg", next)} />
       </div>
       <SectionHeader icon={Grid3X3} title="Size" />
       <div className="inspector-section">

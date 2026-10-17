@@ -1,5 +1,5 @@
 import { Grid, Html, OrbitControls, TransformControls } from "@react-three/drei";
-import { Canvas, type ThreeEvent, useFrame, useThree } from "@react-three/fiber";
+import { Canvas, type ThreeEvent, type ThreeElements, useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import {
   Box3,
@@ -624,7 +624,7 @@ function FieldPlane({
           { signX: -1, signZ: 1 },
           { signX: 1, signZ: 1 },
         ].map(({ signX, signZ }, index) => (
-          <mesh
+          <CornerHandle
             key={index}
             position={[signX * observation.widthM / 2, 0.025, signZ * observation.depthM / 2]}
             renderOrder={20}
@@ -632,10 +632,7 @@ function FieldPlane({
             onPointerMove={moveResize}
             onPointerUp={finishResize}
             onPointerCancel={finishResize}
-          >
-            <sphereGeometry args={[0.14, 14, 10]} />
-            <meshBasicMaterial color="#dce9a7" depthTest={false} toneMapped={false} />
-          </mesh>
+          />
         ))}
         <TransformReadout text={gizmoReadout} position={[0, 0.35, 0]} />
       </group>
@@ -989,7 +986,7 @@ function SpeakerGeometry({
           </>
         )}
         {active && individualControls && bounds.corners.map((corner, index) => (
-          <mesh
+          <CornerHandle
             key={index}
             position={corner}
             renderOrder={20}
@@ -997,16 +994,8 @@ function SpeakerGeometry({
             onPointerMove={moveCornerDrag}
             onPointerUp={finishCornerDrag}
             onPointerCancel={finishCornerDrag}
-          >
-            <sphereGeometry args={[0.055, 14, 10]} />
-            <meshBasicMaterial color="#dce9a7" depthTest={false} toneMapped={false} />
-          </mesh>
+          />
         ))}
-        {active && (
-          <Html position={[bounds.maximum[0] + 0.08, bounds.maximum[1], boundsCenter[2]]} center distanceFactor={10}>
-            <div className="scene-label">{instance.id.toUpperCase()}</div>
-          </Html>
-        )}
         <TransformReadout text={gizmoReadout} position={[0, bounds.maximum[1] + 0.22, boundsCenter[2]]} />
       </group>
       {active && individualControls && (transformMode === "translate" || transformMode === "rotate") && (
@@ -1157,11 +1146,6 @@ function MicrophoneGeometry({
           <cylinderGeometry args={[0.008, 0.008, 0.42, 8]} />
           <meshBasicMaterial color={selected ? "#ffffff" : color} depthTest={false} toneMapped={false} />
         </mesh>
-        {active && (
-          <Html position={[0.18, 0.18, 0]} center distanceFactor={10}>
-            <div className="scene-label">{microphone.name.toUpperCase()}</div>
-          </Html>
-        )}
         <TransformReadout text={gizmoReadout} position={[0, 0.35, 0]} />
       </group>
       {active && transformMode === "translate" && (
@@ -1476,7 +1460,7 @@ function SpeakerSelectionControls({
   return (
     <>
       {bounds.corners.map((corner, index) => (
-        <mesh
+        <CornerHandle
           key={index}
           position={corner}
           renderOrder={20}
@@ -1484,10 +1468,7 @@ function SpeakerSelectionControls({
           onPointerMove={moveHandleDrag}
           onPointerUp={finishHandlePointer}
           onPointerCancel={finishHandlePointer}
-        >
-          <sphereGeometry args={[0.075, 14, 10]} />
-          <meshBasicMaterial color="#dce9a7" depthTest={false} toneMapped={false} />
-        </mesh>
+        />
       ))}
       <group ref={pivotRef}>
         <TransformReadout text={gizmoReadout} position={[0, 0.4, 0]} />
@@ -1516,6 +1497,24 @@ function SpeakerSelectionControls({
       )}
     </>
   );
+}
+
+// Match the screen-space behavior of transform gizmos without scheduling extra frames.
+function CornerHandle(props: ThreeElements["mesh"]) {
+  const mesh = useRef<Mesh>(null);
+  const viewPosition = useMemo(() => new Vector3(), []);
+  useFrame(({ camera, size }) => {
+    if (!mesh.current) return;
+    mesh.current.getWorldPosition(viewPosition).applyMatrix4(camera.matrixWorldInverse);
+    const depth = camera.projectionMatrix.elements[15] === 0 ? Math.abs(viewPosition.z) : 1;
+    const radius = 5 * 2 * depth / (size.height * camera.projectionMatrix.elements[5]);
+    mesh.current.scale.setScalar(radius);
+    mesh.current.updateMatrixWorld();
+  });
+  return <mesh {...props} ref={mesh} name="scene-corner-handle">
+    <sphereGeometry args={[1, 14, 10]} />
+    <meshBasicMaterial color="#dce9a7" depthTest={false} toneMapped={false} />
+  </mesh>;
 }
 
 function CameraFillLight() {
@@ -1707,6 +1706,13 @@ function AcousticScene(props: SceneViewProps) {
 }
 
 export function SceneView(props: SceneViewProps) {
+  // Pointer-up ends the transform before the browser dispatches click. Keep this
+  // gesture marked until the next pointer-down, including zero-distance gizmo clicks.
+  const suppressSelectionClick = useRef(false);
+  const pointerStart = useRef<[number, number] | null>(null);
+  const selectInstance: SceneViewProps["onSelectInstance"] = (id, additive) => {
+    if (!suppressSelectionClick.current) props.onSelectInstance(id, additive);
+  };
   return (
     <Canvas
       frameloop={props.phaseAnimationEnabled && (props.planes ? props.planes.some(p => p.observation.displayMode !== "spl") : props.observation.displayMode !== "spl") ? "always" : "demand"}
@@ -1714,9 +1720,28 @@ export function SceneView(props: SceneViewProps) {
       dpr={[1, 1.7]}
       camera={{ position: [9.5, 7.5, 13.5], fov: 44, near: 0.05, far: 300 }}
       gl={{ antialias: true, alpha: false }}
-      onPointerMissed={() => props.onSelectInstance(null)}
+      onPointerDownCapture={(event) => {
+        suppressSelectionClick.current = false;
+        pointerStart.current = [event.clientX, event.clientY];
+      }}
+      onPointerMoveCapture={(event) => {
+        const start = pointerStart.current;
+        if (event.buttons && start && Math.hypot(event.clientX - start[0], event.clientY - start[1]) > 3) {
+          suppressSelectionClick.current = true;
+        }
+      }}
+      onClickCapture={(event) => {
+        if (suppressSelectionClick.current) event.stopPropagation();
+      }}
+      onPointerMissed={() => selectInstance(null)}
     >
-      <AcousticScene {...props} />
+      <AcousticScene {...props}
+        onSelectInstance={selectInstance}
+        onSourceManipulationStart={(ids) => {
+          suppressSelectionClick.current = true;
+          props.onSourceManipulationStart(ids);
+        }}
+      />
     </Canvas>
   );
 }

@@ -3,12 +3,13 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
-from boundary_deploy.assets import DeployPackageData, DeploySolveCache
+from boundary_deploy.assets import DeployPackageData, DeployRigidMeshData, DeploySolveCache
 from boundary_deploy.packages import common_frequencies, scene_packages
 from boundary_deploy.solve import (
     prepare_deploy_microphone_sweep_request,
     prepare_deploy_rom_microphone_sweep_request,
     prepare_deploy_rom_request,
+    prepare_deploy_solve_request,
 )
 
 
@@ -206,3 +207,25 @@ def test_filter_drives_reach_mixed_solve_paths(mixed, tmp_path, mode):
         field = request["boundary_neumann"] if mode == "boundary" else request["boundary_neumann_sweep"]
         real = field["real"] if mode == "boundary" else field["real"][0]
         assert real[0] == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("coupled", [False, True])
+def test_more_than_sixteen_speakers_and_rigid_objects(mixed, tmp_path, monkeypatch, coupled):
+    payload, cache, a, _ = mixed
+    payload["sources"] = [
+        {"id": f"speaker-{i}", "packageId": "a", "positionX": i * 2, "positionHeightM": 1}
+        for i in range(17)
+    ]
+    rigid_path = tmp_path / "rigid.msh"
+    rigid_path.touch()
+    rigid = DeployRigidMeshData(rigid_path, (str(rigid_path), 1, 1), a.points, a.triangles)
+    monkeypatch.setattr(cache, "load_rigid_mesh", lambda path: rigid)
+    payload["rigidObjects"] = [
+        {"id": f"rigid-{i}", "meshPath": str(rigid_path), "scaleToMeters": 1,
+         "positionX": i * 2, "positionZ": 5, "positionHeightM": 1}
+        for i in range(17)
+    ]
+    prepare = prepare_deploy_rom_request if coupled else prepare_deploy_solve_request
+    _, request = prepare(payload, tmp_path / "large", cache=cache)
+    assert len(request["boundary_components"]) == 34
+    assert sum(c["vertex_count"] for c in request["boundary_components"]) == 136

@@ -1,3 +1,4 @@
+import { FrequencySlider } from "./FrequencySlider";
 import { Activity, Square } from "lucide-react";
 import { useMemo, useState } from "react";
 import { TraceVisibilityFilter } from "./TraceVisibilityFilter";
@@ -51,6 +52,7 @@ export function DriverExcursionPlot({
   data,
   coupledSelected,
   currentFrequencyHz,
+  frequencyValues,
   frequencyPosition,
   frequencyCount,
   onFrequencyPositionChange,
@@ -63,6 +65,7 @@ export function DriverExcursionPlot({
   data: DriverExcursionData | null;
   coupledSelected: boolean;
   currentFrequencyHz: number;
+  frequencyValues: readonly number[];
   frequencyPosition: number;
   frequencyCount: number;
   onFrequencyPositionChange: (position: number) => void;
@@ -121,10 +124,8 @@ export function DriverExcursionPlot({
     <div className="response-toolbar">
       <div className="response-title"><Activity size={14} /><strong>Driver excursion</strong></div>
       <span>Peak displacement magnitude</span>
-      <label className="response-frequency">
-        <span>{formatFrequency(currentFrequencyHz)} Hz</span>
-        <input aria-label="Frequency" type="range" min={0} max={Math.max(0, frequencyCount - 1)} step={1} value={frequencyPosition} onChange={(event) => onFrequencyPositionChange(Number(event.target.value))} />
-      </label>
+      <FrequencySlider frequencyValues={frequencyValues} currentFrequencyHz={currentFrequencyHz} frequencyPosition={frequencyPosition}
+          frequencyCount={frequencyCount} onFrequencyPositionChange={onFrequencyPositionChange} />
       <button className={`bem-pressure-button ${calculating ? "stop" : ""}`} disabled={!calculating && !canCalculate} onClick={onCalculateOrStop}>
         {calculating ? <Square size={11} fill="currentColor" /> : <Activity size={12} />} {calculating ? `Stop ${completedCount}/${totalCount}` : "Calculate Coupled Sweep"}
       </button>

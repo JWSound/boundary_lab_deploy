@@ -814,8 +814,6 @@ def prepare_deploy_solve_request(
         raw_sources = [{"id": "subwoofer-1", **payload["source"]}]
     if not isinstance(raw_sources, list) or not raw_sources:
         raise ValueError("Deploy solve requires at least one source.")
-    if len(raw_sources) > 16:
-        raise ValueError("Deploy solve supports at most 16 sources.")
     sources = [DeploySourcePlacement.from_payload(raw) for raw in raw_sources]
     source_ids = [source.id for source in sources]
     if len(set(source_ids)) != len(source_ids):
@@ -823,8 +821,6 @@ def prepare_deploy_solve_request(
     raw_rigid_objects = payload.get("rigidObjects", [])
     if not isinstance(raw_rigid_objects, list):
         raise ValueError("Deploy rigidObjects must be an array.")
-    if len(raw_rigid_objects) > 16:
-        raise ValueError("Deploy solve supports at most 16 rigid objects.")
     rigid_objects = [DeployRigidPlacement.from_payload(raw) for raw in raw_rigid_objects]
     rigid_ids = [item.id for item in rigid_objects]
     if len(set(rigid_ids)) != len(rigid_ids) or set(rigid_ids).intersection(source_ids):

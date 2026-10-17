@@ -1,3 +1,4 @@
+import { FrequencySlider } from "./FrequencySlider";
 import { Square, Waves } from "lucide-react";
 import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { MicrophoneResponseSet } from "../model/types";
@@ -47,6 +48,7 @@ export function MicrophoneResponsePlot({
   coupled,
   overlays = [],
   currentFrequencyHz,
+  frequencyValues,
   frequencyPosition,
   frequencyCount,
   onFrequencyPositionChange,
@@ -62,6 +64,7 @@ export function MicrophoneResponsePlot({
   coupled: BemResponseData | null;
   overlays?: MicrophoneOverlay[];
   currentFrequencyHz: number;
+  frequencyValues: readonly number[];
   frequencyPosition: number;
   frequencyCount: number;
   onFrequencyPositionChange: (position: number) => void;
@@ -173,19 +176,8 @@ export function MicrophoneResponsePlot({
     <div className="microphone-response">
       <div className="response-toolbar">
         <div className="response-title"><Waves size={14} /><strong>Microphone response</strong></div>
-        <span>{frequencies.length} package frequencies</span>
-        <label className="response-frequency">
-          <span>{formatFrequency(currentFrequencyHz)} Hz</span>
-          <input
-            aria-label="Frequency"
-            type="range"
-            min={0}
-            max={Math.max(0, frequencyCount - 1)}
-            step={1}
-            value={frequencyPosition}
-            onChange={(event) => onFrequencyPositionChange(Number(event.target.value))}
-          />
-        </label>
+        <FrequencySlider frequencyValues={frequencyValues} currentFrequencyHz={currentFrequencyHz} frequencyPosition={frequencyPosition}
+          frequencyCount={frequencyCount} onFrequencyPositionChange={onFrequencyPositionChange} />
         <button
           className={`bem-pressure-button ${calculating ? "stop" : ""}`}
           disabled={!calculating && !canCalculatePressure}

@@ -1,5 +1,9 @@
 import { assetIdentity } from "./model/assetIdentity";
+import { estimateSolverComplexity } from "./model/solverComplexity";
+import { SolverComplexityReadout } from "./components/SolverComplexityReadout";
+import { ProjectName } from "./components/ProjectName";
 import { SceneOutliner } from "./components/SceneOutliner";
+import { SidePanelResizeHandle } from "./components/SidePanelResizeHandle";
 import { AssetBrowser, type AssetRow } from "./components/AssetBrowser";
 import { emptyOrganization } from "./model/sceneOrganization";
 import { SolverPreferencesDialog } from "./components/SolverPreferencesDialog";
@@ -104,6 +108,39 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
   const [assetNotice, setAssetNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [solverBackend, setSolverBackend] = useState<"cpu" | "cuda" | "metal" | null>(null);
+  const [interfaceScale, setInterfaceScale] = useState(0.9);
+  const [scaleSaving, setScaleSaving] = useState(false);
+  const [panelWidths, setPanelWidths] = useState({ left: 280, right: 330 });
+  const [layoutWidth, setLayoutWidth] = useState(() => Math.max(780, window.innerWidth));
+  useEffect(() => {
+    const resize = () => {
+      const width = Math.max(780, window.innerWidth);
+      setLayoutWidth(width);
+      setPanelWidths(current => {
+        const left = Math.min(current.left, width - 300 - 260);
+        const right = Math.min(current.right, width - 300 - left);
+        return { left, right };
+      });
+    };
+    resize();
+    window.addEventListener("resize", resize);
+    return () => window.removeEventListener("resize", resize);
+  }, []);
+  useEffect(() => {
+    let disposed = false;
+    window.boundaryLabDesktop?.getInterfaceScale?.().then(scale => {
+      if (!disposed) setInterfaceScale(scale);
+    }).catch(caught => { if (!disposed) setError(String(caught)); });
+    return () => { disposed = true; };
+  }, []);
+  const changeInterfaceScale = async (scale: number) => {
+    const save = window.boundaryLabDesktop?.setInterfaceScale;
+    if (!save) return;
+    setScaleSaving(true);
+    try { setInterfaceScale(await save(scale)); }
+    catch (caught) { setError(String(caught)); }
+    finally { setScaleSaving(false); }
+  };
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [preferencesSaving, setPreferencesSaving] = useState(false);
   useEffect(() => {
@@ -191,8 +228,8 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
   const analysisResizeRef = useRef<{ startY: number; startHeight: number } | null>(null);
 
   const clampAnalysisDrawerHeight = useCallback((height: number) => {
-    const maximum = Math.max(150, window.innerHeight - 58 - 180);
-    return Math.round(Math.max(150, Math.min(maximum, height)));
+    const maximum = Math.max(110, window.innerHeight - (window.innerWidth <= 650 ? 96 : 58) - 150);
+    return Math.round(Math.max(110, Math.min(maximum, height)));
   }, []);
 
   const beginAnalysisResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
@@ -217,6 +254,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
 
   useEffect(() => {
     const clampOnResize = () => setAnalysisDrawerHeight((height) => clampAnalysisDrawerHeight(height));
+    clampOnResize();
     window.addEventListener("resize", clampOnResize);
     return () => window.removeEventListener("resize", clampOnResize);
   }, [clampAnalysisDrawerHeight]);
@@ -890,6 +928,17 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     }
   };
 
+  const latestSolveKey = useRef(currentSolveKey);
+  latestSolveKey.current = currentSolveKey;
+  const confirmSolverMemory = useCallback(async () => {
+    if (!solverBackend || fidelity === "pattern") return true;
+    const memory = estimateSolverComplexity(packages, sourceConfigs, rigidMeshes, rigidObjects, fidelity, solverBackend,
+      audiencePlanes.reduce((sum, plane) => sum + plane.columns * plane.rows, microphones.length)).memory;
+    if (!memory || !window.boundaryLabDesktop?.confirmSolverMemory) return true;
+    return window.boundaryLabDesktop.confirmSolverMemory({ backend: solverBackend, fidelity,
+      systemUpper: memory.system.maximum, gpuUpper: memory.gpu?.maximum ?? 0 });
+  }, [solverBackend, fidelity, packages, sourceConfigs, rigidMeshes, rigidObjects, audiencePlanes, microphones.length]);
+
   const solveLevel2 = useCallback(async () => {
     if (!solverBackend || preferencesSaving || !window.boundaryLabDesktop || !level2Package?.sourcePath) {
       setError("Solving requires disk-backed speaker packages.");
@@ -915,6 +964,10 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
       return;
     }
     try {
+      const allowed = await confirmSolverMemory();
+      if (generation !== solveGeneration.current) return;
+      if (!allowed) { setLiveSolveEnabled(false); setSolveState("idle"); setSolveMessage("Solve cancelled"); return; }
+      if (latestSolveKey.current !== requestedKey) { setSolveState("idle"); return; }
       const rendererRequestStarted = performance.now();
       let boundaryReady = boundarySolutionKey === requestedBoundarySolutionKey;
       const nextFields: Record<string, FieldFrame> = {};
@@ -986,7 +1039,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
       setSolveMessage(`${fidelityLabel} solve failed`);
       setError(caught instanceof Error ? caught.message : String(caught));
     }
-  }, [preferencesSaving, solverBackend, solvePackagePaths, boundarySolutionKey, currentBoundarySolutionKey, currentSolveKey, drivenSourceConfigs, fidelity, frequencyIndex, level2Package, audiencePlanes, patternFields, patternField, frequenciesHz, rigidMeshById, rigidObjects]);
+  }, [confirmSolverMemory, preferencesSaving, solverBackend, solvePackagePaths, boundarySolutionKey, currentBoundarySolutionKey, currentSolveKey, drivenSourceConfigs, fidelity, frequencyIndex, level2Package, audiencePlanes, patternFields, patternField, frequenciesHz, rigidMeshById, rigidObjects]);
 
   const stopMicrophoneSweep = useCallback(async () => {
     if (!window.boundaryLabDesktop || microphoneSweepState !== "solving") return;
@@ -1034,6 +1087,13 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     });
     setError(null);
     try {
+      const allowed = await confirmSolverMemory();
+      if (generation !== sweepGeneration.current) return;
+      if (!allowed || stoppingMicrophoneSweep.current) {
+        microphoneSweepKeyRef.current = null;
+        setMicrophoneSweepState("idle");
+        return;
+      }
       const result = await window.boundaryLabDesktop.calculateMicrophoneSweep({
         packagePath: level2Package.sourcePath,
         packagePaths: solvePackagePaths,
@@ -1114,7 +1174,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     } finally {
       if (generation === sweepGeneration.current) stoppingMicrophoneSweep.current = false;
     }
-  }, [solvePackagePaths, drivenSourceConfigs, fidelity, level2Package, microphonePatternResponses.frequenciesHz, microphoneSweepKey, microphones, rigidMeshById, rigidObjects]);
+  }, [confirmSolverMemory, solverBackend, solvePackagePaths, drivenSourceConfigs, fidelity, level2Package, microphonePatternResponses.frequenciesHz, microphoneSweepKey, microphones, rigidMeshById, rigidObjects]);
 
   const calculateOrStopMicrophoneSweep = () => {
     if (microphoneSweepState === "solving") void stopMicrophoneSweep();
@@ -1996,14 +2056,14 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
   return (
     <main
       className={`app-shell ${analysisDrawerResizing ? "resizing-analysis" : ""}`}
-      style={{ "--analysis-drawer-height": `${analysisDrawerHeight}px` } as CSSProperties}
+      style={{ "--analysis-drawer-height": `${analysisDrawerHeight}px`, "--navigator-width": `${panelWidths.left}px`, "--inspector-width": `${panelWidths.right}px` } as CSSProperties}
     >
       <header className="topbar">
         <div className="brand">
           <img className="brand-mark" src="./deploy-icon.png" alt="" width={32} height={32} />
           <div><strong>Boundary Lab</strong><span>DEPLOY</span></div>
         </div>
-        <div className="project-breadcrumb"><button className="text-button" onClick={() => { if (!projectEdited || window.confirm("Return to Projects and discard unsaved changes?")) onProjects(); }}>Projects</button><ChevronRight size={13} /><strong>{projectName}</strong>{projectEdited && <i>Edited</i>}</div>
+        <div className="project-breadcrumb"><button className="text-button" onClick={() => { if (!projectEdited || window.confirm("Return to Projects and discard unsaved changes?")) onProjects(); }}>Projects</button><ChevronRight size={13} /><ProjectName name={projectName} onRename={name => { editor.end(); setProjectName(name); }} />{projectEdited && <i>Edited</i>}</div>
         <FidelitySwitcher
           backend={solverBackend}
           value={fidelity}
@@ -2028,9 +2088,15 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
         </div>
       </header>
       {preferencesOpen && <SolverPreferencesDialog backend={solverBackend}
+        interfaceScale={interfaceScale} scaleBusy={scaleSaving}
+        onScaleChange={window.boundaryLabDesktop?.setInterfaceScale ? changeInterfaceScale : undefined}
         busy={preferencesSaving || solveState === "solving" || microphoneSweepState === "solving"}
         onChange={changeSolverBackend} onClose={() => setPreferencesOpen(false)} />}
 
+      <SidePanelResizeHandle side="left" value={panelWidths.left} minimum={220} maximum={Math.min(600, layoutWidth - panelWidths.right - 300)}
+        onChange={left => setPanelWidths(current => ({ ...current, left }))} />
+      <SidePanelResizeHandle side="right" value={panelWidths.right} minimum={260} maximum={Math.min(600, layoutWidth - panelWidths.left - 300)}
+        onChange={right => setPanelWidths(current => ({ ...current, right }))} />
       <aside className="left-panel panel navigator-panel">
         <div className="navigator-upper" style={{ height: `${navigatorSplit}%` }}>
           <div className="panel-tabs"><button className={leftTab === "scene" ? "active" : ""} onClick={() => setLeftTab("scene")}>Scene</button><button className={leftTab === "channels" ? "active" : ""} onClick={() => setLeftTab("channels")}>Channels</button></div>
@@ -2126,6 +2192,9 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
           </div>
         </div>
         }
+        <SolverComplexityReadout packages={packages} sources={sourceConfigs} meshes={rigidMeshes} objects={rigidObjects}
+          fidelity={fidelity} backend={solverBackend}
+          evaluationPoints={audiencePlanes.reduce((sum, plane) => sum + plane.columns * plane.rows, microphones.length)} />
         <div className="viewport-hint">Ctrl+click: multi-select · Orbit: left drag · Pan: right drag · Zoom: wheel</div>
       </section>
 
@@ -2186,8 +2255,8 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
           role="separator"
           aria-label="Resize frequency response pane"
           aria-orientation="horizontal"
-          aria-valuemin={150}
-          aria-valuemax={Math.max(150, window.innerHeight - 58 - 180)}
+          aria-valuemin={110}
+          aria-valuemax={Math.max(110, window.innerHeight - (window.innerWidth <= 650 ? 96 : 58) - 150)}
           aria-valuenow={analysisDrawerHeight}
           tabIndex={0}
           onPointerDown={beginAnalysisResize}
@@ -2206,7 +2275,6 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
             <div className="analysis-capture-controls">
               <input aria-label="Capture name" placeholder="Name this comparison" value={captureName} onChange={(event) => setCaptureName(event.target.value)} />
               <button disabled={microphonePatternResponses.traces.length === 0 && !currentDriverExcursion} onClick={captureCurrentAnalysis}>Capture results</button>
-              <span>Captures stay fixed as the scene changes.</span>
             </div>
             {captures.length > 0 && <div className="analysis-captures" aria-label="Captured results">
               {captures.map((capture) => <div key={capture.id}>
@@ -2252,6 +2320,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
               currentFrequencyHz={frequenciesHz[frequencyIndex]}
               frequencyPosition={sortedPosition}
               frequencyCount={usableFrequencyIndices.length}
+              frequencyValues={usableFrequencyIndices.map(index => frequenciesHz[index])}
               onFrequencyPositionChange={(position) => setFrequencyIndex(usableFrequencyIndices[position])}
               canCalculatePressure={selectedSolverAvailable && microphones.length > 0 && solveState !== "solving"}
               calculationLabel={fidelity === "coupled" ? "Calculate Coupled Pressure" : "Calculate BEM Pressure"}
@@ -2265,6 +2334,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
               currentFrequencyHz={frequenciesHz[frequencyIndex]}
               frequencyPosition={sortedPosition}
               frequencyCount={usableFrequencyIndices.length}
+              frequencyValues={usableFrequencyIndices.map(index => frequenciesHz[index])}
               onFrequencyPositionChange={(position) => setFrequencyIndex(usableFrequencyIndices[position])}
               canCalculate={fidelity === "coupled" && coupledAvailable && solveState !== "solving"}
               calculating={microphoneSweepState === "solving"}
@@ -2278,6 +2348,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
               currentFrequencyHz={frequenciesHz[frequencyIndex]}
               frequencyPosition={sortedPosition}
               frequencyCount={usableFrequencyIndices.length}
+              frequencyValues={usableFrequencyIndices.map(index => frequenciesHz[index])}
               onFrequencyPositionChange={(position) => setFrequencyIndex(usableFrequencyIndices[position])}
               canCalculate={fidelity === "coupled" && coupledAvailable && solveState !== "solving"}
               calculating={microphoneSweepState === "solving"}
