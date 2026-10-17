@@ -1,3 +1,4 @@
+import { parseCapture, serializeCapture, type AnalysisCapture } from "../model/analysisCapture";
 import { emptyOrganization, parseOrganization, type SceneOrganization } from "../model/sceneOrganization";
 import { validatePlaneSampling } from "../model/planeSampling";
 import { parseEqualizer } from "../model/filters";
@@ -7,7 +8,7 @@ import { createDefaultChannel, DEFAULT_CHANNEL_ID, DEFAULT_SYSTEM_GAIN_DB } from
 import type { DeployChannel, EqualizerConfiguration, Fidelity, LoadedSpeakerPackage, MicrophoneConfiguration, ObservationPlane, AudiencePlane, RigidMeshAsset, RigidMeshConfiguration, SourceConfiguration } from "../model/types";
 
 export const DEPLOY_PROJECT_SCHEMA = "boundary-lab-deploy-project";
-export const DEPLOY_PROJECT_SCHEMA_VERSION = 12;
+export const DEPLOY_PROJECT_SCHEMA_VERSION = 13;
 
 export interface DeployPackageReference {
   id: string;
@@ -42,6 +43,8 @@ export interface DeployProject {
   selected_frequency_hz: number;
   requested_fidelity: Fidelity;
   scene_organization: SceneOrganization;
+  analysis_captures: AnalysisCapture[];
+  visible_capture_ids: string[];
 }
 
 function microphoneConfiguration(value: unknown, index: number): MicrophoneConfiguration {
@@ -220,7 +223,7 @@ export function parseDeployProject(contents: string): DeployProject {
   const project = record(raw, "Project");
   if (project.schema !== DEPLOY_PROJECT_SCHEMA) throw new Error("This is not a Boundary Lab Deploy project.");
   const version = finite(project.schema_version, "schema_version");
-  if (version !== 5 && version !== 6 && version !== 7 && version !== 8 && version !== 9 && version !== 10 && version !== 11 && version !== DEPLOY_PROJECT_SCHEMA_VERSION) {
+  if (version !== 5 && version !== 6 && version !== 7 && version !== 8 && version !== 9 && version !== 10 && version !== 11 && version !== 12 && version !== DEPLOY_PROJECT_SCHEMA_VERSION) {
     throw new Error(`Unsupported Boundary Lab Deploy project schema version ${version}.`);
   }
   if (typeof project.name !== "string" || project.name.trim().length === 0) {
@@ -325,10 +328,19 @@ export function parseDeployProject(contents: string): DeployProject {
   if (requestedFidelity !== "pattern" && requestedFidelity !== "boundary" && requestedFidelity !== "coupled") {
     throw new Error("requested_fidelity must be pattern, boundary, or coupled.");
   }
+  const captures = project.analysis_captures === undefined ? [] : (() => {
+    if (!Array.isArray(project.analysis_captures)) throw new Error("analysis_captures must be an array.");
+    const items = project.analysis_captures.map(parseCapture);
+    if (new Set(items.map(c => c.id)).size !== items.length) throw new Error("Duplicate capture IDs.");
+    return items;
+  })();
+  const visibleIds = Array.isArray(project.visible_capture_ids) ? project.visible_capture_ids.filter((id): id is string => typeof id === "string" && captures.some(c => c.id === id)) : captures.map(c => c.id);
   return {
     schema: DEPLOY_PROJECT_SCHEMA,
     schema_version: DEPLOY_PROJECT_SCHEMA_VERSION,
     name: project.name.trim(),
+    analysis_captures: captures,
+    visible_capture_ids: visibleIds,
     packages,
     rigid_meshes: rigidMeshes,
     channels,
@@ -358,11 +370,15 @@ export function createDeployProject(
   heatmapScale: PlaneScale = planeScale(Array.isArray(observation) ? observation[0] : observation),
   systemGainDb = DEFAULT_SYSTEM_GAIN_DB,
   organization: SceneOrganization = emptyOrganization(),
+  captures: AnalysisCapture[] = [],
+  visibleCaptureIds: string[] = captures.map(c => c.id),
 ): DeployProject {
   return {
     schema: DEPLOY_PROJECT_SCHEMA,
     schema_version: DEPLOY_PROJECT_SCHEMA_VERSION,
     name,
+    analysis_captures: captures,
+    visible_capture_ids: visibleCaptureIds,
     packages: packages.map((pkg) => ({ id: pkg.id, name: pkg.manifest.name, source_file: pkg.sourcePath, original_path: pkg.originalPath, fingerprint: pkg.fingerprint })),
     rigid_meshes: rigidMeshes.map((asset) => ({
       id: asset.id,
@@ -386,5 +402,5 @@ export function createDeployProject(
 }
 
 export function serializeDeployProject(project: DeployProject): string {
-  return `${JSON.stringify(project, null, 2)}\n`;
+  return `${JSON.stringify({ ...project, analysis_captures: project.analysis_captures.map(c => JSON.parse(serializeCapture(c))) }, null, 2)}\n`;
 }

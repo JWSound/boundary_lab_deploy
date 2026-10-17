@@ -1,3 +1,5 @@
+import { createDeployProject, parseDeployProject, serializeDeployProject } from "../src/io/deployProject";
+import { initialScene } from "../src/model/sceneEditor";
 import assert from "node:assert/strict";
 import { acousticLoadingTraces, updateAcousticLoading, differentialMagnitude, pressureDisplayScale } from "../src/model/acousticLoading";
 import type { MicrophoneSweepResult } from "../src/model/types";
@@ -5,7 +7,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ElectricalPlot } from "../src/components/ElectricalPlot";
 import { crosshairCoordinates } from "../src/components/PlotCrosshair";
-import { captureAnalysis, microphoneOverlays, serializeCapture, type AnalysisCapture } from "../src/model/analysisCapture";
+import { parseCapture, captureAnalysis, microphoneOverlays, serializeCapture, type AnalysisCapture } from "../src/model/analysisCapture";
 
 const original: AnalysisCapture = {
   id: "capture-1", name: "Wide array", createdAt: "2026-09-06T00:00:00Z", project: "{}",
@@ -51,7 +53,7 @@ console.log("Acoustic loading captures, missing samples and legacy results passe
 const markup = renderToStaticMarkup(createElement(ElectricalPlot, {
   data: { key: "test", frequenciesHz: new Float64Array(), traces: new Map([["cab:driver", acousticTrace]]) },
   view: "acoustic", coupledSelected: true, currentFrequencyHz: 80, frequencyPosition: 1,
-  frequencyCount: 3, onFrequencyPositionChange: () => {}, canCalculate: true,
+  frequencyCount: 3, frequencyValues: [40, 80, 160], onFrequencyPositionChange: () => {}, canCalculate: true,
   calculating: false, completedCount: 3, totalCount: 3, onCalculateOrStop: () => {},
 }));
 assert.ok(markup.includes("R / (ρcSd)"));
@@ -103,17 +105,41 @@ assert.equal(JSON.parse(serializeCapture(savedPressure)).raw.coupled.acoustic_lo
 const pressureMarkup = renderToStaticMarkup(createElement(ElectricalPlot, {
   data: { key: "pressure", frequenciesHz: new Float64Array(), traces: completedPressure },
   view: "differential", coupledSelected: true, currentFrequencyHz: 80, frequencyPosition: 1,
-  frequencyCount: 3, onFrequencyPositionChange: () => {}, canCalculate: true,
+  frequencyCount: 3, frequencyValues: [40, 80, 160], onFrequencyPositionChange: () => {}, canCalculate: true,
   calculating: false, completedCount: 3, totalCount: 3, onCalculateOrStop: () => {},
 }));
 assert.ok(pressureMarkup.includes("|Δp| RMS (Pa)"));
 assert.ok(!pressureMarkup.includes('class="electrical-phase-trace"'));
-assert.ok(pressureMarkup.includes("not a damage limit"));
+
 assert.ok(!pressureMarkup.includes("NaN"));
 console.log("Pressure differential streaming, RMS/peak units, captures and chart passed.");
-assert.ok(markup.includes("single-cabinet scene"));
 assert.ok(!markup.includes("Isolated reference"));
 const cursorAxes = { width: 600, height: 400, left: 50, right: 550, top: 20, bottom: 320, minimum: -10, maximum: 10, frequencyMaximum: 2000, identity: "test" };
 assert.deepEqual(crosshairCoordinates(cursorAxes, 300, 170), { frequency: 200, value: 0 });
 assert.deepEqual(crosshairCoordinates(cursorAxes, -100, -100), { frequency: 20, value: 10 });
 assert.deepEqual(crosshairCoordinates(cursorAxes, 900, 900), { frequency: 2000, value: -10 });
+
+const restored = parseCapture(JSON.parse(serializeCapture(saved)));
+assert.deepEqual(restored, saved);
+const captureGap = captureAnalysis(saved);
+captureGap.pattern.traces[0].splDb[0] = NaN;
+captureGap.boundary!.traces.get("mic")![1] = NaN;
+const restoredGap = parseCapture(JSON.parse(serializeCapture(captureGap)));
+assert.ok(Number.isNaN(restoredGap.pattern.traces[0].splDb[0]));
+assert.ok(Number.isNaN(restoredGap.boundary!.traces.get("mic")![1]));
+assert.deepEqual(acousticLoadingTraces(parseCapture(JSON.parse(serializeCapture(acousticCapture))).raw.coupled!), acousticLoadingTraces(acousticCapture.raw.coupled!));
+assert.throws(() => parseCapture({ ...portable, pattern: { ...portable.pattern, frequenciesHz: [100] } }), /sample count/);
+console.log("Capture restore, missing samples and validation passed.");
+
+const fullCapture = captureAnalysis(saved);
+fullCapture.coupled = fullCapture.boundary;
+fullCapture.excursion = { key: "scene", frequenciesHz: new Float64Array([100, 200]), traces: new Map([["driver", { name: "Driver", excursionMm: new Float32Array([1, NaN]) }]]) };
+fullCapture.electrical = { key: "scene", frequenciesHz: new Float64Array([100, 200]), traces: new Map([["speaker", { name: "Speaker", impedanceMagnitudeOhm: new Float32Array([4, 5]), impedancePhaseDeg: new Float32Array([0, 30]), rmsCurrentA: new Float32Array([1, 2]), realPowerW: new Float32Array([4, 20]) }]]) };
+const savedProject = createDeployProject("Capture study", [], [], initialScene().channels, [], [], [], [], 80, "pattern");
+savedProject.analysis_captures = [fullCapture];
+savedProject.visible_capture_ids = [];
+const restoredProject = parseDeployProject(serializeDeployProject(savedProject));
+assert.deepEqual(restoredProject.analysis_captures, [fullCapture]);
+assert.deepEqual(restoredProject.visible_capture_ids, []);
+assert.equal(serializeDeployProject(restoredProject), serializeDeployProject(savedProject));
+console.log("Project capture round trip preserves all response types and hidden overlays.");

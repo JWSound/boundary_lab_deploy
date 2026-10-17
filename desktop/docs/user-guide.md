@@ -68,8 +68,8 @@ between planes. More planes add field-evaluation work. Select a plane to inspect
 its settings and legend. Field solving requires at least one plane; microphone
 and speaker-response sweeps remain available without a plane.
 
-Saved projects now use schema v8. Existing v5-v7 projects open with their original
-plane preserved. Older Deploy versions cannot open newly saved v8 files.
+Saved projects use schema v13. Existing v5-v12 projects remain readable, with
+legacy observation planes preserved. Older Deploy versions cannot open v13 files.
 
 ## Scene and controls
 
@@ -251,11 +251,30 @@ are not frozen as completed captured results. There is no built-in isolated-cabi
 reference overlay.
 
 **Save project** writes `.blabdeploy.json`: scene configuration, channels, asset
-references, and display settings. It does not embed the speaker/mesh files or
-save calculated result caches and captures. Keep referenced assets available.
+references, display settings, and named captures (including their visibility and
+stored response data). Captures return when you reopen the project. Live result
+caches are not saved. Speaker/mesh files are referenced rather than embedded;
+keep these assets available. New saves use schema v13; older application versions
+cannot open them. Existing v5-v12 projects remain readable.
+
 **Download** on a capture writes `.blabanalysis.json` for external retention;
-importing that file is not currently supported. Captures are session-only—do not
-close the application assuming a project save preserved them.
+importing that standalone file is not currently supported.
+
+### Autosave and recovery
+
+The desktop app keeps a separate recovery copy of unsaved edits, including captures,
+in its application data folder. It writes after one second without changes and at
+least every ten seconds during continuous editing. The toolbar confirms when a
+recovery copy is saved and reports failures. Manual Save still controls your project
+file; autosave never overwrites it.
+
+After an interrupted session, the Projects screen lists available recovery copies
+with their timestamps. Choose **Restore**, locate any missing assets, then **Save
+project** to keep the recovered work. **Discard** permanently removes that recovery
+copy. Saving or explicitly discarding workspace edits clears their recovery copy.
+Changes since the last completed autosave may be lost in a crash. Recovery does not
+embed external assets or preserve an in-progress solver run. Browser preview does
+not provide automatic disk recovery.
 
 ## Limits and troubleshooting
 

@@ -19,7 +19,10 @@ interface RecentProject {
   path: string; name: string; openedAt: string; modifiedAt: string | null; available: boolean;
 }
 
+interface RecoveryProject { id: string; name: string; updatedAt: string; }
+
 interface DesktopProjectSelection {
+  recoveryId?: string;
   name: string;
   path: string;
   contents: string;
@@ -101,6 +104,10 @@ interface Window {
     rememberProject: (path: string, name: string) => Promise<void>;
     openSpeakerPackage: () => Promise<DesktopPackageSelection | null>;
     openRigidMesh: () => Promise<DesktopPackageSelection | null>;
+    recoveryList?: () => Promise<RecoveryProject[]>;
+    recoveryWrite?: (id: string, contents: string) => Promise<void>;
+    recoveryRemove?: (id: string) => Promise<void>;
+    recoveryOpen?: (id: string) => Promise<DesktopProjectSelection>;
     saveProject: (contents: string, suggestedName: string) => Promise<string | null>;
     solveLevel2: (request: DesktopLevel2SolveRequest) => Promise<import("./model/types").Level2SolveResult>;
     calculateMicrophoneSweep: (request: DesktopMicrophoneSweepRequest) => Promise<import("./model/types").MicrophoneSweepResult>;
