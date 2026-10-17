@@ -17,7 +17,8 @@ app.whenReady().then(async()=>{
       import React from 'react'; import {createRoot} from 'react-dom/client';
       import {App} from './src/App'; import './src/styles.css';
       window.clipText=''; window.failWrite=false;
-      window.testDesktop={getSolverBackend:async()=>"cuda",setSolverBackend:async(backend)=>{window.savedBackend=backend;return backend;},recentProjects:async()=>window.saved?[{path:'E:/Studies/test.blabdeploy.json',name:window.saved.name,modifiedAt:'2026-09-20T12:00:00Z',openedAt:'2026-09-22T12:00:00Z',available:true}]:[],rememberProject:async()=>{},
+      window.memoryAllowed=true;window.memoryChecks=[];
+      window.testDesktop={confirmSolverMemory:async estimate=>{window.memoryChecks.push(estimate);return window.memoryAllowed;},getSolverBackend:async()=>"cuda",setSolverBackend:async(backend)=>{window.savedBackend=backend;return backend;},recentProjects:async()=>window.saved?[{path:'E:/Studies/test.blabdeploy.json',name:window.saved.name,modifiedAt:'2026-09-20T12:00:00Z',openedAt:'2026-09-22T12:00:00Z',available:true}]:[],rememberProject:async()=>{},
         openProject:async(path)=>{window.openedPath=path;return {name:'test.blabdeploy.json',path,contents:JSON.stringify(window.saved),packages:[],rigidMeshes:[]};},loadBundledExample:async()=>null,onSolveStatus:()=>()=>{},onMicrophoneSweepProgress:()=>()=>{},
         solveLevel2:async(request)=>new Promise(resolve=>{(window.solveRequests ||= []).push(request);window.finishSolve=resolve;}),
         calculateMicrophoneSweep:async()=>new Promise(resolve=>{window.finishSweep=resolve;}),
@@ -73,6 +74,27 @@ app.whenReady().then(async()=>{
     await click('button[aria-label="Preferences"]');
     assert.equal(await run('document.querySelector("#solver-backend").value'), 'cpu');
     await click('dialog button');
+    // Project title editing is committed once, cancellable, and saved in project data.
+    const originalName=(await save()).name;
+    const rename=async (value,keyName='Enter')=>{
+      await run(`document.querySelector('.project-name').dispatchEvent(new MouseEvent('dblclick',{bubbles:true}))`);
+      await wait('document.querySelector(".project-name-input")');
+      await run(`(()=>{const input=document.querySelector('.project-name-input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,${JSON.stringify(value)});input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+      await delay(50);
+      if(keyName==='blur') await run(`document.querySelector('.project-name-input').dispatchEvent(new FocusEvent('focusout',{bubbles:true}))`);
+      else await run(`document.querySelector('.project-name-input').dispatchEvent(new KeyboardEvent('keydown',{key:${JSON.stringify(keyName)},bubbles:true}))`);
+      await wait('!document.querySelector(".project-name-input")');
+    };
+    await rename('  Main Hall  ');
+    assert.equal(await run(`document.querySelector('.project-name').textContent`),'Main Hall');
+    assert.equal(await run(`document.querySelector('.project-breadcrumb i')?.textContent`),'Edited');
+    assert.equal((await save()).name,'Main Hall');
+    await key('z');assert.equal((await save()).name,originalName);
+    await key('y');assert.equal((await save()).name,'Main Hall');
+    await rename('Cancelled','Escape');assert.equal((await save()).name,'Main Hall');
+    await rename('   ');assert.equal((await save()).name,'Main Hall');
+    await rename('Balcony','blur');assert.equal((await save()).name,'Balcony');
+    await key('z');assert.equal((await save()).name,'Main Hall');
     assert.equal((await save()).system_gain_db,32);
     assert.equal((await save()).channels[0].levelDb,-24);
     await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Channels').click()`);
@@ -262,7 +284,7 @@ app.whenReady().then(async()=>{
     await run(`(()=>{const x=document.querySelector('.right-panel input[aria-label="X"]');x.focus();x.dispatchEvent(new FocusEvent('focusin',{bubbles:true}));
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(x,'-30');x.dispatchEvent(new Event('input',{bubbles:true}));
       x.dispatchEvent(new FocusEvent('focusout',{bubbles:true}));
-      const depth=document.querySelector('.right-panel input[aria-label="Depth"]');depth.focus();depth.dispatchEvent(new FocusEvent('focusin',{bubbles:true}));})()`);
+      const depth=document.querySelector('.right-panel input[aria-label="Z"]');depth.focus();depth.dispatchEvent(new FocusEvent('focusin',{bubbles:true}));})()`);
     for(const value of [10,11]) {
       await delay(80);
       await run(`(()=>{const d=document.activeElement;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(d,'${value}');d.dispatchEvent(new Event('input',{bubbles:true}));})()`);
@@ -274,6 +296,13 @@ app.whenReady().then(async()=>{
     await run(`Array.from(document.querySelectorAll('.fidelity-switcher button')).find(b=>b.textContent.includes('Boundary')).click()`);
     await delay(100);await click('button[aria-label="Add microphone"]');
     await click('button[aria-label="Add audience plane"]');
+    await run('window.memoryAllowed=false');
+    await run(`Array.from(document.querySelectorAll('.topbar button')).find(b=>b.textContent.includes('Solve field')).click()`);
+    await wait('window.memoryChecks.length === 1');await delay(100);
+    assert.equal(await run('window.solveRequests?.length ?? 0'),0,'Cancel memory warning must not start a solve');
+    assert.ok(await run('window.memoryChecks[0].systemUpper > 0'));
+    assert.ok(await run(`Array.from(document.querySelectorAll('.topbar button')).some(b=>b.textContent.includes('Solve field'))`),'Cancel disables live solving');
+    await run('window.memoryAllowed=true');
     await run(`Array.from(document.querySelectorAll('.topbar button')).find(b=>b.textContent.includes('Solve field')).click()`);
     await wait('window.solveRequests?.length === 1');
     await run(`window.finishSolve({columns:2,rows:2,spl_db:[40,40,40,40],sample_indices:[0,1,2,3],field_pressure:{real:[1,1,1,1],imag:[0,0,0,0]},timings:{}})`);
@@ -306,6 +335,12 @@ app.whenReady().then(async()=>{
     await run(`window.finishSolve({columns:2,rows:2,spl_db:[80,80,80,80],sample_indices:[0,1,2,3],field_pressure:{real:[1,1,1,1],imag:[0,0,0,0]},timings:{}})`);
     await delay(100);
     assert.equal(await run(`document.querySelector('.solve-status').dataset.solveRevision`),revision);
+    await run('window.memoryAllowed=false');
+    const checksBeforeSweep=await run('window.memoryChecks.length');
+    await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent.includes('Calculate BEM Pressure')).click()`);
+    await wait(`window.memoryChecks.length > ${checksBeforeSweep}`);await delay(100);
+    assert.equal(await run('typeof window.finishSweep'), 'undefined','Cancel memory warning must not start a frequency sweep');
+    await run('window.memoryAllowed=true');
     await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent.includes('Calculate BEM Pressure')).click()`);
     await wait('typeof window.finishSweep === "function"');
     await key('z');await key('y');

@@ -28,7 +28,26 @@ Create new speaker packages in the main Boundary Lab application; see its
 [User Guide](https://github.com/JWSound/boundary-lab/blob/main/docs/User%20Guide.md) and
 [package documentation](https://github.com/JWSound/boundary-lab/blob/main/docs/Inputs%20and%20Outputs.md).
 
+## Display and readability
+
+Open **Preferences → Appearance → Interface scale** to choose 85%, 90%, 95%,
+100%, or 110%. The setting applies immediately, is saved on this device, and adds
+to Windows/macOS display scaling. It does not change project geometry or results.
+Start at 90% with the larger default text, then choose the scale that feels comfortable.
+Browser sessions use the browser's zoom controls instead.
+
+Drag the inner border of either side panel to adjust its width. Double-click a
+border to restore its default width, or focus it and use the arrow keys for
+fine adjustments. Both panels remain visible. At very narrow window sizes,
+the workspace scrolls horizontally to keep its controls usable.
+The analysis drawer expands across the window at narrower widths; drag its top
+edge to give plots more room. EQ controls and compact plot layouts can scroll
+when they need more space.
+
 ## Projects and audience planes
+
+Double-click the project name in the top toolbar to rename it. Press Enter or
+click away to confirm, or Escape to cancel. Save the project to retain the name.
 
 The Projects screen appears at every launch. Recent projects are stored locally,
 ordered by most recently opened or saved, with dates read from the files themselves.
@@ -274,3 +293,39 @@ project session, with their referenced packages, meshes, and channels still load
 Desktop uses the system clipboard; the browser preview uses an in-app clipboard.
 Undo/redo pauses live solving, clears derived results, and discards late results
 from an earlier solve; use Solve field to refresh the restored scene.
+
+## Solver complexity readout
+
+Boundary and Coupled modes show two rows at the viewport's bottom left:
+solver-mesh boundary unknowns, followed by an approximate solver-memory range.
+Coupled mode also lists reduced speaker states separately because those states
+are eliminated internally rather than added to the exterior system size.
+Each speaker and rigid-object instance contributes, including muted speakers.
+Microphones and audience grids add evaluation work, not boundary unknowns.
+
+Memory ranges describe a single-frequency solver working set: RAM on CPU,
+RAM and GPU memory on CUDA, or unified memory on Metal. They are estimates,
+not measured usage or guaranteed peak limits. They exclude application/runtime
+overhead and complete multi-frequency package caches. Geometry corrections,
+solver caches, convergence and allocation workspaces can change actual use.
+Unknown or unsupported model metadata displays “unavailable” rather than zero.
+
+The estimate uses 8 bytes per complex single-precision matrix entry. For CPU
+and Metal the baseline allows four N×N buffers and two N×F buffers, with a
+2× upper allowance; CUDA allows 1.5–3 N×N buffers plus optional coupled N×F
+feedback storage. Geometry, reduced matrices, iterative vectors and evaluation
+samples add allowances. These heuristics have not been calibrated against
+measured peak memory and do not predict elapsed solve time.
+
+There is no fixed 16-speaker or 16-rigid-object solve limit. Before a field solve
+or frequency sweep, Deploy compares the estimated memory upper bounds with
+installed RAM and, for CUDA, NVIDIA GPU capacity. If either is exceeded, choose
+**Cancel** or **Continue anyway**. Continuing is remembered for the same mode
+and backend in that window until the estimate exceeds the approved bounds.
+
+The comparison uses total capacity, not currently free memory. On systems with
+multiple visible NVIDIA GPUs, the smallest capacity is used conservatively;
+VRAM is never added across GPUs. If GPU detection is unavailable, only RAM is
+checked. Metal uses the unified-memory estimate against system RAM. Missing
+estimate metadata cannot be compared; a lack of warning is not a guarantee that
+a solve will fit.

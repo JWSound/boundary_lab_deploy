@@ -53,6 +53,28 @@ const solverPreferences = new SolverPreferences(join(app.getPath("userData"), "s
 ipcMain.handle("deploy:get-solver-backend", () => solverPreferences.get());
 ipcMain.handle("deploy:set-solver-backend", (_event, backend) => solverPreferences.set(backend));
 
+const { InterfacePreferences } = require("./interfacePreferences.cjs");
+const interfacePreferences = new InterfacePreferences(join(app.getPath("userData"), "interface-preferences.json"));
+ipcMain.handle("deploy:get-interface-scale", () => interfacePreferences.get());
+ipcMain.handle("deploy:set-interface-scale", async (_event, scale) => {
+  const saved = await interfacePreferences.set(scale);
+  for (const window of BrowserWindow.getAllWindows()) window.webContents.setZoomFactor(saved);
+  return saved;
+});
+
+const { SolverMemoryGuard } = require("./solverMemory.cjs");
+const solverMemoryGuard = new SolverMemoryGuard();
+ipcMain.handle("deploy:confirm-solver-memory", (event, estimate) =>
+  solverMemoryGuard.check(event.sender.id, estimate, options => {
+    const parent = BrowserWindow.fromWebContents(event.sender);
+    if (!parent || parent.isDestroyed()) return { response: 0 };
+    return dialog.showMessageBox(parent, options);
+  }));
+app.on("web-contents-created", (_event, contents) => {
+  const owner = contents.id;
+  contents.once("destroyed", () => solverMemoryGuard.forget(owner));
+});
+
 function createWindow() {
   const level2Smoke = process.argv.includes("--smoke-level2");
   const benchmarkLevel2 = process.argv.includes("--benchmark-level2");
@@ -69,6 +91,7 @@ function createWindow() {
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(here, "preload.cjs"),
+      zoomFactor: interfacePreferences.get(),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,

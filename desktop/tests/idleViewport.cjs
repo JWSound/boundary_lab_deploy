@@ -30,9 +30,31 @@ app.whenReady().then(async () => {
         let props={packages:[pkg], rigidMeshes:[], sources:defaultSources(pkg).map(buildSourceInstance),
           rigidObjects:[], microphones:[], observation, field, phaseAnimationEnabled:false,
           selectedInstances:[], activeInstance:null, transformMode:'select', angleSnapDisabled:false,
-          onSelectInstance:noop, onTransformSource:noop, onTransformRigid:noop, onTransformSources:noop,
+          onSelectInstance:(id)=>{window.selectionEvents.push(id);}, onTransformSource:noop, onTransformRigid:noop, onTransformSources:noop,
           onTransformMicrophone:noop, onTransformObservation:noop, onResizeObservation:noop,
           onSourceManipulationStart:noop, onSourceManipulationEnd:noop, onManipulationEnd:noop};
+        window.selectionEvents=[];
+        const sceneState=()=>Array.from(_roots.values())[0].store.getState();
+        window.handleSizes=()=>{
+          const state=sceneState(), sizes=[];
+          state.scene.traverse(o=>{if(o.name==='scene-corner-handle') {
+            const p=o.getWorldPosition(new Vector3()).applyMatrix4(state.camera.matrixWorldInverse);
+            sizes.push(o.scale.x * state.camera.projectionMatrix.elements[5] * state.size.height / (2*Math.abs(p.z)));
+          }});
+          return sizes;
+        };
+        window.zoomScene=(factor)=>{
+          const state=sceneState();state.camera.position.sub(state.controls.target).multiplyScalar(factor).add(state.controls.target);
+          state.controls.update();state.invalidate();
+        };
+        window.objectPoint=()=>{
+          const state=sceneState(), p=new Vector3(...props.sources[1].position).project(state.camera);
+          const r=state.gl.domElement.getBoundingClientRect();
+          return {x:Math.round(r.left+(p.x+1)*r.width/2),y:Math.round(r.top+(1-p.y)*r.height/2)};
+        };
+        window.gizmoEvent=(type)=>{
+          sceneState().scene.traverse(o=>{if(o.isTransformControls) o.dispatchEvent({type});});
+        };
         window.updateScene=(patch)=>{ props={...props,...patch}; root.render(<SceneView {...props}/>); };
         window.updateObservation=(patch)=>window.updateScene({observation:{...props.observation,...patch}});
         window.replaceField=()=>window.updateScene({field:{...field,splDb:new Float32Array(64).fill(115)}});
@@ -98,6 +120,37 @@ app.whenReady().then(async () => {
     assert.equal(result.spl,115,'New solve results must update the displayed texture');
     await changed('window.moveSpeaker()');
     await changed('window.updateScene({selectedInstances:["subwoofer-1"],activeInstance:"subwoofer-1",transformMode:"translate"})');
+    assert.equal(await update('document.querySelectorAll(".scene-label").length'),0,'Selection must not add viewport name labels');
+    const assertHandles=async count=>{
+      const sizes=await update('window.handleSizes()');
+      assert.equal(sizes.length,count);
+      sizes.forEach(radius=>assert.ok(Math.abs(radius-5)<0.05,'Corner radius must stay at five CSS pixels: '+radius));
+    };
+    await assertHandles(8);
+    for (const scale of [1.25, 1.5, 2, 1]) {
+      win.webContents.setZoomFactor(scale);
+      await delay(200);await settled();await assertHandles(8);
+    }
+    await changed('window.zoomScene(2)');await assertHandles(8);
+    await changed('window.zoomScene(0.5)');await assertHandles(8);
+    for (const mode of ['translate','rotate']) {
+      await changed('window.updateScene({selectedInstances:["subwoofer-1","subwoofer-2"],activeInstance:"subwoofer-2",transformMode:'+JSON.stringify(mode)+'})');
+      await assertHandles(8);
+      const point=await update('window.objectPoint()');
+      await update('window.selectionEvents=[]');
+      win.webContents.sendInputEvent({type:'mouseDown',...point,button:'left',clickCount:1});await delay(50);
+      // Reproduce the control lifecycle followed by the browser's release click
+      // over a selected cabinet, including a gesture below the movement threshold.
+      await update('window.gizmoEvent("mouseDown");window.gizmoEvent("mouseUp")');
+      win.webContents.sendInputEvent({type:'mouseUp',...point,button:'left',clickCount:1});await delay(100);
+      assert.deepEqual(await update('window.selectionEvents'),[],mode+' release must preserve the multi-selection');
+      await changed('window.updateScene({transformMode:"select"})');
+      win.webContents.sendInputEvent({type:'mouseDown',...point,button:'left',clickCount:1});
+      win.webContents.sendInputEvent({type:'mouseUp',...point,button:'left',clickCount:1});await delay(100);
+      assert.deepEqual(await update('window.selectionEvents'),['subwoofer-2'],'The next deliberate click must still select');
+    }
+    await changed('window.zoomScene(2)');await assertHandles(8);
+    await changed('window.zoomScene(0.5)');await assertHandles(8);
     const beforeCamera=await read();
     win.webContents.sendInputEvent({type:'mouseWheel',x:400,y:300,deltaY:120,deltaX:0});
     await delay(200);

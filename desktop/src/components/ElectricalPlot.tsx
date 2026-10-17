@@ -1,3 +1,4 @@
+import { FrequencySlider } from "./FrequencySlider";
 import { Gauge, Square, Waves } from "lucide-react";
 import { useMemo, useState } from "react";
 import { driverTraceColor } from "./DriverExcursionPlot";
@@ -57,6 +58,7 @@ export function ElectricalPlot({
   view = "impedance",
   coupledSelected,
   currentFrequencyHz,
+  frequencyValues,
   frequencyPosition,
   frequencyCount,
   onFrequencyPositionChange,
@@ -70,6 +72,7 @@ export function ElectricalPlot({
   view?: ElectricalView;
   coupledSelected: boolean;
   currentFrequencyHz: number;
+  frequencyValues: readonly number[];
   frequencyPosition: number;
   frequencyCount: number;
   onFrequencyPositionChange: (position: number) => void;
@@ -147,10 +150,8 @@ export function ElectricalPlot({
           <button className={acousticPart === "reactance" ? "active" : ""} onClick={() => setAcousticPart("reactance")}>Reactance</button>
         </> : <span>{view === "impedance" ? "Impedance" : view === "current" ? "RMS current" : "Real input power"}</span>}
       </div>
-      <label className="response-frequency">
-        <span>{formatFrequency(currentFrequencyHz)} Hz</span>
-        <input aria-label="Frequency" type="range" min={0} max={Math.max(0, frequencyCount - 1)} step={1} value={frequencyPosition} onChange={(event) => onFrequencyPositionChange(Number(event.target.value))} />
-      </label>
+      <FrequencySlider frequencyValues={frequencyValues} currentFrequencyHz={currentFrequencyHz} frequencyPosition={frequencyPosition}
+          frequencyCount={frequencyCount} onFrequencyPositionChange={onFrequencyPositionChange} />
       <button className={`bem-pressure-button ${calculating ? "stop" : ""}`} disabled={!calculating && !canCalculate} onClick={onCalculateOrStop}>
         {calculating ? <Square size={11} fill="currentColor" /> : <Waves size={12} />} {calculating ? `Stop ${completedCount}/${totalCount}` : "Calculate Coupled Sweep"}
       </button>
@@ -179,8 +180,6 @@ export function ElectricalPlot({
             </svg>
             <div className="response-legend electrical-legend">
               {view === "impedance" && <em><b className="line-sample" />Magnitude <b className="line-sample phase" />Phase</em>}
-              {loadingView && <>
-                <span style={{ pointerEvents: "auto" }} title={view === "differential" ? "Net opposing force divided by effective projected area. Peak is sinusoidal amplitude, not local cone stress or a damage limit. Zero-velocity pressure remains valid." : "Net opposing acoustic load divided by ρcSd. Reactance uses exp(+iωt); near-zero velocity impedance is omitted."}>{view === "differential" ? "Loading diagnostic, not a damage limit. " : ""}For comparison, sweep a single-cabinet scene and Capture results.</span></>}
             </div>
             <button className="response-range-toggle" type="button" onClick={() => setFrequencyMaximum((current) => current === 2000 ? 20000 : 2000)}>20 Hz–{frequencyMaximum === 2000 ? "2 kHz" : "20 kHz"}</button>
             </div>

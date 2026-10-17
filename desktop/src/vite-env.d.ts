@@ -88,6 +88,9 @@ interface Window {
     libraryFolder: (action: "open" | "choose") => Promise<LibrarySnapshot>;
     readLibraryAsset: (path: string, fingerprint?: string) => Promise<DesktopPackageSelection>;
     importLibraryAssets: (paths?: string[]) => Promise<{ snapshot: LibrarySnapshot; results: { path: string; destination?: string; error?: string }[] }>;
+    getInterfaceScale?: () => Promise<number>;
+    setInterfaceScale?: (scale: number) => Promise<number>;
+    confirmSolverMemory?: (estimate: { backend: "cpu" | "cuda" | "metal"; fidelity: "boundary" | "coupled"; systemUpper: number; gpuUpper: number }) => Promise<boolean>;
     getSolverBackend: () => Promise<"cpu" | "cuda" | "metal">;
     setSolverBackend: (backend: "cpu" | "cuda" | "metal") => Promise<"cpu" | "cuda" | "metal">;
     readSceneClipboard: () => Promise<string>;
