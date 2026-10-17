@@ -15,6 +15,7 @@ import {
   MeshPhongMaterial,
   NearestFilter,
   MathUtils,
+  Object3D,
   Plane,
   Quaternion,
   RedFormat,
@@ -735,6 +736,14 @@ function SpeakerGeometry({
       if (!(child instanceof Mesh)) return;
       const highlight = (material: MeshPhongMaterial) => {
         const copy = material.clone();
+        // Imported matte-black paint often has almost no specular response.
+        // Broad, neutral highlights reveal its shape without lifting diffuse black.
+        if (copy instanceof MeshPhongMaterial
+          && Math.max(copy.color.r, copy.color.g, copy.color.b) < 0.05
+          && Math.max(copy.specular.r, copy.specular.g, copy.specular.b) < 0.05) {
+          copy.specular.set("#505050");
+          copy.shininess = 12;
+        }
         if (selected && copy.emissive) copy.emissive.set("#2a3218");
         return copy;
       };
@@ -1515,6 +1524,30 @@ function SpeakerSelectionControls({
   );
 }
 
+function CameraFillLight() {
+  const rig = useRef<Group>(null);
+  const target = useMemo(() => {
+    const object = new Object3D();
+    object.position.set(0, 0, -10);
+    return object;
+  }, []);
+
+  // Follow the camera on existing frames without keeping the demand loop awake.
+  useFrame(({ camera }) => {
+    if (!rig.current) return;
+    camera.getWorldPosition(rig.current.position);
+    camera.getWorldQuaternion(rig.current.quaternion);
+    rig.current.updateMatrixWorld(true);
+  });
+
+  return (
+    <group ref={rig}>
+      <primitive object={target} />
+      <directionalLight position={[3, 4, 6]} target={target} intensity={1.2} color="#ffffff" />
+    </group>
+  );
+}
+
 function AcousticScene(props: SceneViewProps) {
   const invalidate = useThree((state) => state.invalidate);
   // Uniform and ref mutations are invisible to Fiber's prop-change detection.
@@ -1558,8 +1591,10 @@ function AcousticScene(props: SceneViewProps) {
       <color attach="background" args={["#293134"]} />
       <fog attach="fog" args={["#293134", 70, 220]} />
       <ambientLight intensity={0.65} />
+      <CameraFillLight />
       <directionalLight
-        position={[-7, 12, -5]}
+        // Rotate the key light +90 degrees around Y (CCW viewed from above).
+        position={[-5, 12, 7]}
         intensity={2.2}
         color="#f5f0de"
         castShadow
