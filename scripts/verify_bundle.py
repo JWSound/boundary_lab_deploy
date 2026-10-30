@@ -31,9 +31,9 @@ def main():
     parser.add_argument("--destination", type=Path, default=ROOT / "build/Relocated Deploy/resources")
     parser.add_argument("--solve", action="store_true")
     parser.add_argument("--qualify-backends", action="store_true",
-                        help="Qualify CPU and the platform GPU, cached fields, and sweeps offline")
-    parser.add_argument("--backend", choices=("cpu", "cuda", "metal"),
-                        help="Single-solve backend; defaults to the platform GPU")
+                        help="Qualify CPU and the selected GPU, cached fields, and sweeps offline")
+    parser.add_argument("--backend", choices=("cpu", "cuda", "metal", "rocm"),
+                        help="Solve backend and GPU for qualification; CPU uses the platform GPU for qualification")
     parser.add_argument("--scene", choices=("single", "mixed-close-ground"), default="single")
     parser.add_argument("--data-directory", type=Path, help="Writable test data outside the installed resources")
     parser.add_argument("--in-place", action="store_true", help="Verify an already relocated/installed resource directory")
@@ -51,6 +51,8 @@ def main():
     if windows:
         validate_cuda_inventory(manifest["files"])
     backend = args.backend or ("cuda" if windows else "metal")
+    qualification_gpu = backend if backend != "cpu" else ("cuda" if windows else "metal")
+    qualification_mode = {"cuda": "both", "metal": "cpu-metal", "rocm": "cpu-rocm"}[qualification_gpu]
     links = manifest.get("symlinks", {})
     verify_links(destination, links)
     expected_files = dict(manifest["files"])
@@ -100,7 +102,7 @@ def main():
                        env=environment, cwd=user, check=True, timeout=900)
     if args.qualify_backends:
         subprocess.run([python, "-I", "-B", "-X", "utf8", ROOT / "scripts/check_solver_backends.py",
-                        "--library", destination / "library", "--backend", "both" if windows else "cpu-metal",
+                        "--library", destination / "library", "--backend", qualification_mode,
                         "--scene", args.scene,
                         "--output", user / ("backends-" + uuid.uuid4().hex[:8])],
                        env=environment, cwd=user, check=True, timeout=1800)
@@ -113,7 +115,10 @@ def main():
     unexpected = {str(p.relative_to(destination)).replace("\\", "/") for p in destination.rglob("*") if p.is_file() or p.is_symlink()} - set(expected_files) - set(links) - {"runtime-manifest.json"}
     if unexpected:
         raise RuntimeError(f"Runtime created files in its installation: {sorted(unexpected)[:10]}")
-    report = {"worker_ready": True, "solve": args.solve, "qualified_backends": args.qualify_backends, "resources_unchanged": True,
+    report = {"worker_ready": True, "solve": args.solve, "qualified_backends": args.qualify_backends,
+              "solve_backend": backend if args.solve else None,
+              "qualification_backends": ["cpu", qualification_gpu] if args.qualify_backends else [],
+              "resources_unchanged": True,
               "destination": str(destination), "runtime_id": manifest["runtime_id"]}
     (user / "verification.json").write_text(json.dumps(report, indent=2))
     print(json.dumps(report, indent=2))

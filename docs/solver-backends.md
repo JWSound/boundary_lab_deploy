@@ -64,3 +64,21 @@ After building the installer, `./scripts/test_installer.ps1 -QualifyBackends`
 installs it into a guarded temporary directory, verifies app launch and offline
 CPU/CUDA numerical execution, then uninstalls that test copy. It refuses to
 replace an existing Deploy installation.
+
+For an AMD runtime candidate, select ROCm explicitly:
+
+```powershell
+python scripts/verify_bundle.py --resources build/resources --solve --qualify-backends --backend rocm --scene mixed-close-ground
+./scripts/test_installer.ps1 -QualifyBackends -Backend rocm
+```
+
+The bundle verifier passes ROCm to the smoke solve and CPU/ROCm to the full
+qualification script. Its report records the selected solve and qualification
+backends. The existing Windows default remains CPU/CUDA; `--backend cpu` selects
+a CPU smoke solve while retaining the platform GPU for full qualification.
+
+These options do not add ROCm dependencies to a bundle. The Windows runtime
+builder currently stages only the CPU and CUDA Julia environments, and the
+release lock still pins an engine without Deploy ROCm support. ROCm environment
+staging, the offline AMD library contract, a qualified immutable engine artifact,
+and actual installed-runtime qualification remain required before an AMD release.
