@@ -1,6 +1,6 @@
 const { readFile, mkdir, writeFile, rename } = require("node:fs/promises");
 const { dirname } = require("node:path");
-const valid = (value) => value === "cpu" || value === "cuda" || value === "metal";
+const valid = (value) => value === "cpu" || value === "cuda" || value === "metal" || value === "rocm";
 
 class SolverPreferences {
   constructor(path, detect) { this.path = path; this.detect = detect; this.initializing = null; }
@@ -21,13 +21,13 @@ class SolverPreferences {
     return backend;
   }
   async write(backend) {
-    if (!valid(backend)) throw new Error("Solver backend must be CPU, CUDA or Metal.");
+    if (!valid(backend)) throw new Error("Solver backend must be CPU, CUDA, Metal or ROCm.");
     await mkdir(dirname(this.path), { recursive: true });
     await writeFile(this.path + ".tmp", JSON.stringify({ backend }) + "\n", "utf8");
     await rename(this.path + ".tmp", this.path);
   }
   async set(backend) {
-    if (!valid(backend)) throw new Error("Solver backend must be CPU, CUDA or Metal.");
+    if (!valid(backend)) throw new Error("Solver backend must be CPU, CUDA, Metal or ROCm.");
     await this.get();
     await this.write(backend);
     this.initializing = Promise.resolve(backend);

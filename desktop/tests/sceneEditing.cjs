@@ -3,6 +3,8 @@ const {build}=require('esbuild');
 const assert=require('node:assert/strict');
 const {join}=require('node:path');
 const {readFileSync,writeFileSync,mkdirSync}=require('node:fs');
+const switchedBackend=process.env.DEPLOY_TEST_BACKEND || 'cuda';
+assert.ok(['cuda','rocm'].includes(switchedBackend));
 app.whenReady().then(async()=>{
   setTimeout(()=>{console.error('Editing test timed out');app.exit(1);},90000).unref();
   const win=new BrowserWindow({show:false,width:1500,height:1000,webPreferences:{backgroundThrottling:false,offscreen:true}});
@@ -313,12 +315,12 @@ app.whenReady().then(async()=>{
     assert.deepEqual(await run('window.planeFrames.map(p=>p.spl)'),[40,90],'Distinct solver fields are routed to the matching planes');
     await run(`Array.from(document.querySelectorAll('.topbar button')).find(b=>b.textContent.includes('Pause solve')).click()`);
     await click('button[aria-label="Preferences"]');
-    await run(`(()=>{const select=document.querySelector('#solver-backend');select.value='cuda';select.dispatchEvent(new Event('change',{bubbles:true}));})()`);
-    await wait('window.savedBackend === "cuda"');
+    await run(`(()=>{const select=document.querySelector('#solver-backend');select.value='${switchedBackend}';select.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+    await wait(`window.savedBackend === "${switchedBackend}"`);
     await click('dialog button');
     await run(`Array.from(document.querySelectorAll('.topbar button')).find(b=>b.textContent.includes('Solve field')).click()`);
     await wait('window.solveRequests?.length === 3');
-    assert.equal(await run('window.solveRequests[2].backend'),'cuda');
+    assert.equal(await run('window.solveRequests[2].backend'),switchedBackend);
     assert.equal(await run('window.solveRequests[2].reuseBoundary'),false,'Backend switch invalidates cached CPU boundary');
     await click('button[aria-label="Preferences"]');
     assert.equal(await run('document.querySelector("#solver-backend").disabled'),true,'Do not switch during a solve');
@@ -348,7 +350,7 @@ app.whenReady().then(async()=>{
     await delay(100);
     assert.ok(await run('window.cancelledSweeps>0'));
     assert.equal(await run(`document.querySelectorAll('.solve-error').length`),0);
-    assert.ok(await run('window.solveRequests.slice(0,2).every(request=>request.backend === "cpu") && window.solveRequests.slice(2).every(request=>request.backend === "cuda")'));
+    assert.ok(await run(`window.solveRequests.slice(0,2).every(request=>request.backend === "cpu") && window.solveRequests.slice(2).every(request=>request.backend === "${switchedBackend}")`));
     assert.deepEqual(errors,[]);
     console.log('Projects and editing UI passed: blank startup, recent reopen, multiple planes and distinct fields, clipboard/history, late result rejection.');
     app.exit(0);

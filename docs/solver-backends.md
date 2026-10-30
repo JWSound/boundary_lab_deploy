@@ -1,10 +1,25 @@
 # Solver backends
 
-Preferences (the top-right settings button) selects CPU, NVIDIA CUDA, or Apple Metal for Boundary and Coupled solves, microphone sweeps, and audience-plane updates. The choice is saved in `solver-preferences.json` under Electron's user-data directory, independently of projects. Metal requires an engine candidate with Deploy Metal support; see [macOS development](macos.md).
+Preferences (the top-right settings button) selects CPU, NVIDIA CUDA, AMD ROCm, or Apple Metal for Boundary and Coupled solves, microphone sweeps, and audience-plane updates. The choice is saved in `solver-preferences.json` under Electron's user-data directory, independently of projects. ROCm requires an engine candidate advertising Deploy ROCm support; the currently pinned 0.5.1 wheel does not provide this path. Metal requires an engine candidate with Deploy Metal support; see [macOS development](macos.md).
 
-On first launch, Deploy probes the native accelerator's versioned worker handshake: Metal on Apple Silicon, CUDA on Windows/Linux, CPU on Intel Macs. Metal must advertise Deploy solver support as well as a functional device. Unavailable accelerators fall back to CPU. Later launches retain the saved choice. Selecting a backend is disabled during a running solve or sweep. Switching backends invalidates the desktop result identity and uses the corresponding engine worker.
+On first launch, Deploy probes the native accelerator's versioned worker handshake: Metal on Apple Silicon, CUDA then ROCm on Windows/Linux, CPU on Intel Macs. Metal and ROCm must advertise Deploy solver support as well as a functional device and required solver libraries. Unavailable accelerators fall back to CPU. Later launches retain the saved choice. Selecting a backend is disabled during a running solve or sweep. Switching backends invalidates the desktop result identity and uses the corresponding engine worker.
 
 The CPU coupled path uses the exported parity Petrov-Galerkin speaker ROM, the CPU exterior Burton-Miller operators, one exterior LU factorization per frequency, and a host-array GMRES feedback solve. It preserves the same ROM response, phasor convention, field reuse, and sweep warm-start contracts as CUDA.
+
+The ROCm path assembles native boundary operators and evaluates fields on the AMD
+GPU. Boundary and Coupled solves use one ComplexF64 rocSOLVER factorization per
+frequency; requested-precision operators remain resident during repeated solves.
+Coupled ROM response and GMRES vectors remain on the host, with the GPU factors
+reused for every feedback application. Cached audience fields and frequency-sweep
+geometry use backend-specific caches. CUDA-specific projected/compressed RHS and
+factor-reuse experiments remain CUDA-specific; they are not required for the
+standard CPU/ROCm workflows.
+
+The desktop shows separate RAM and VRAM estimates for ROCm's retained operators
+and Float64 factors. These are uncalibrated working-set ranges. AMD VRAM capacity
+is not currently queried by the desktop memory guard; it does not use NVIDIA
+capacity as a substitute. Runtime qualification is still required for each target
+GPU/driver configuration.
 
 ## Development and release dependency
 
@@ -18,11 +33,18 @@ Run from the Deploy development environment:
 
 ```powershell
 python scripts/check_solver_backends.py --output runs/backend-qualification --backend both
+python scripts/check_solver_backends.py --output runs/rocm-qualification --backend cpu-rocm
+python scripts/check_solver_backends.py --output runs/rocm-mixed --backend cpu-rocm --scene mixed-close-ground
 python scripts/smoke_solver.py --backend cpu --output runs/mixed-cpu
 python scripts/smoke_solver.py --backend cuda --output runs/mixed-cuda
 ```
 
 The first command runs Boundary and Coupled solves, cached field evaluation, and two-frequency sweeps, checks CPU/CUDA complex-pressure agreement within a relative norm tolerance of 0.0005, and checks coupled convergence and sweep warm starts. It writes request/result artifacts under the requested new directory. The mixed smoke commands use two different speaker packages.
+
+The `cpu-rocm` commands apply the same comparisons to ROCm, including complex
+diaphragm velocity and coil current. They also verify capability negotiation and
+actual ROCm dense-solver/factor-precision/field diagnostics. The mixed scene
+exercises near corrections between different cabinets and their ground images.
 
 Also run Python tests, the desktop build, `npm run test:runtime`, and `npm run test:editing-ui`. Engine changes require the Julia reference gate and CPU GMRES tests. Qualify the final installer on a machine without NVIDIA hardware before publishing; development CPU tests and a CUDA-hidden availability probe do not replace installed-runtime qualification.
 

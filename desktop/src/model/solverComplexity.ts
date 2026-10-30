@@ -1,6 +1,6 @@
 import type { Fidelity, LoadedSpeakerPackage, RigidMeshAsset, SourceConfiguration, RigidMeshConfiguration } from "./types";
 
-export type SolverBackend = "cpu" | "cuda" | "metal";
+export type SolverBackend = "cpu" | "cuda" | "metal" | "rocm";
 export interface MemoryRange { minimum: number; maximum: number }
 export interface SolverComplexity {
   boundaryUnknowns: number | null;
@@ -58,6 +58,12 @@ export function estimateSolverComplexity(packages: LoadedSpeakerPackage[], sourc
     // Direct-system assembly plus LU workspace. Coupled feedback may retain an N×F map.
     result.memory = { system: range(auxiliary, 2 * auxiliary + matrix),
       gpu: range(1.5 * matrix + auxiliary, 3 * matrix + 2 * auxiliary + (fidelity === "coupled" ? mixedOperator : 0)), unified: false };
+  } else if (backend === "rocm") {
+    // Native Float32 operators and identities stay resident; dense factors are
+    // ComplexF64. Allow for the promoted matrix, factor copy and solver workspace.
+    const resident = 5 * matrix + 3 * mixedOperator + auxiliary;
+    result.memory = { system: range(0.5 * (matrix + mixedOperator) + auxiliary, matrix + mixedOperator + 2 * auxiliary),
+      gpu: range(resident, 2 * resident), unified: false };
   } else {
     // CPU/Metal retain boundary operators, the assembled system and factorization.
     const base = 4 * matrix + 2 * mixedOperator + auxiliary;
