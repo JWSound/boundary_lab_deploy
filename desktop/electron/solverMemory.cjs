@@ -28,14 +28,14 @@ async function detectMemory(backend, run = execute) {
   return hardware;
 }
 function validateRequest(request) {
-  if (!request || !["cpu", "cuda", "metal"].includes(request.backend) || !["boundary", "coupled"].includes(request.fidelity) ||
+  if (!request || !["cpu", "cuda", "metal", "rocm"].includes(request.backend) || !["boundary", "coupled"].includes(request.fidelity) ||
       ![request.systemUpper, request.gpuUpper].every(value => Number.isFinite(value) && value >= 0)) throw Error("Invalid solver memory estimate.");
 }
 function memoryWarnings(request, hardware) {
   const warnings = [];
   const format = value => `${(value / GiB).toFixed(1)} GiB`;
   if (request.systemUpper > hardware.ram) warnings.push(`${request.backend === "metal" ? "Unified memory" : "RAM"}: estimated up to ${format(request.systemUpper)}; installed ${format(hardware.ram)}.`);
-  if (request.backend === "cuda" && hardware.gpu && request.gpuUpper > hardware.gpu.bytes) {
+  if (["cuda", "rocm"].includes(request.backend) && hardware.gpu && request.gpuUpper > hardware.gpu.bytes) {
     warnings.push(`GPU memory: estimated up to ${format(request.gpuUpper)}; capacity ${format(hardware.gpu.bytes)}${hardware.gpu.multiple ? " (smallest visible NVIDIA GPU)" : ""}.`);
   }
   return warnings;
@@ -66,7 +66,7 @@ class SolverMemoryGuard {
     const response = await show({ type: "warning", title: "Estimated solver memory exceeds capacity",
       message: "This scene may require more memory than this computer has.",
       detail: warnings.join("\n") + "\n\nThese estimates are approximate and exclude application overhead. Continuing may fail or make the computer unresponsive. Reduce scene complexity or continue anyway."
-        + (request.backend === "cuda" && !hardware.gpu ? "\n\nGPU capacity could not be detected; only RAM was checked." : ""),
+        + (["cuda", "rocm"].includes(request.backend) && !hardware.gpu ? "\n\nGPU capacity could not be detected; only RAM was checked." : ""),
       buttons: ["Cancel", "Continue anyway"], defaultId: 0, cancelId: 0, noLink: true });
     if (response.response !== 1) return false;
     this.approved.set(key, { systemUpper: request.systemUpper, gpuUpper: request.gpuUpper });

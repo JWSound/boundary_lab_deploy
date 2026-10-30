@@ -386,17 +386,19 @@ def test_detect_backend_uses_engine_availability(monkeypatch, available, system,
         worker_info = {"backends": {accelerator: {"available": available}}, "deploy_solver_backends": ["cpu", "cuda", "metal"]}
         def __init__(self, **kwargs):
             assert kwargs["solver_script"].name == "coupled_solver.jl"
-            assert kwargs["julia_project"].name == "julia_" + accelerator
+            selected = kwargs["julia_project"].name.removeprefix("julia_")
+            assert selected in ({"cuda", "rocm"} if system == "win32" else {"metal"})
         def ensure_started(self):
             calls.append("start")
         def terminate(self):
             calls.append("stop")
     monkeypatch.setattr(deploy_worker, "BeatEngineWorkerProcess", Probe)
     assert deploy_worker.detect_solver_backend() == (accelerator if available is True else "cpu")
-    assert calls == ["start", "stop"]
+    assert calls == ["start", "stop"] * (2 if system == "win32" and available is not True else 1)
 
 
 def test_detect_backend_falls_back_and_cleans_up_on_failure(monkeypatch):
+    monkeypatch.setattr(deploy_worker.sys, "platform", "win32")
     stopped = []
     class Probe:
         def __init__(self, **kwargs):
@@ -407,7 +409,7 @@ def test_detect_backend_falls_back_and_cleans_up_on_failure(monkeypatch):
             stopped.append(True)
     monkeypatch.setattr(deploy_worker, "BeatEngineWorkerProcess", Probe)
     assert deploy_worker.detect_solver_backend() == "cpu"
-    assert stopped == [True]
+    assert stopped == [True, True]
 
 
 def test_intel_mac_uses_cpu_without_accelerator_probe(monkeypatch):
@@ -417,7 +419,8 @@ def test_intel_mac_uses_cpu_without_accelerator_probe(monkeypatch):
     assert deploy_worker.detect_solver_backend() == "cpu"
 
 
-def test_metal_worker_uses_public_engine_paths(monkeypatch):
+@pytest.mark.parametrize("backend", ["metal", "rocm"])
+def test_accelerator_worker_uses_public_engine_paths(monkeypatch, backend):
     class Worker:
         worker_info = {"deploy_solver_backends": ["metal"]}
         def __init__(self, **kwargs):
@@ -425,8 +428,8 @@ def test_metal_worker_uses_public_engine_paths(monkeypatch):
         def ensure_started(self):
             pass
     monkeypatch.setattr(deploy_worker, "BeatEngineWorkerProcess", Worker)
-    worker = deploy_worker._worker(" Metal ")
-    assert worker.options["julia_project"].name == "julia_metal"
+    worker = deploy_worker._worker(f" {backend.upper()} ")
+    assert worker.options["julia_project"].name == "julia_" + backend
     assert worker.options["solver_script"].name == "solver.jl"
 
 
@@ -449,10 +452,11 @@ def test_metal_requires_deploy_capability_not_only_a_functional_device(monkeypat
     assert len(stopped) == 2
 
 
-@pytest.mark.parametrize("availability", [None, {}, {"available": False, "reason": "Metal import failed"}])
-def test_metal_support_without_runtime_readiness_is_rejected(availability):
+@pytest.mark.parametrize("backend,label", [("metal", "Metal"), ("rocm", "ROCm")])
+@pytest.mark.parametrize("availability", [None, {}, {"available": False, "reason": "Runtime import failed"}])
+def test_accelerator_support_without_runtime_readiness_is_rejected(availability, backend, label):
     class Worker:
-        worker_info = {"deploy_solver_backends": ["metal"], "backends": {"metal": availability or {}}}
+        worker_info = {"deploy_solver_backends": [backend], "backends": {backend: availability or {}}}
         stopped = False
 
         def ensure_started(self):
@@ -462,14 +466,15 @@ def test_metal_support_without_runtime_readiness_is_rejected(availability):
             self.stopped = True
 
     worker = Worker()
-    with pytest.raises(RuntimeError, match="Metal solver initialization failed"):
-        deploy_worker._check_backend_capability(worker, "metal")
+    with pytest.raises(RuntimeError, match=f"{label} solver initialization failed"):
+        deploy_worker._check_backend_capability(worker, backend)
     assert worker.stopped
 
 
-def test_metal_ready_worker_is_accepted():
+@pytest.mark.parametrize("backend", ["metal", "rocm"])
+def test_accelerator_ready_worker_is_accepted(backend):
     class Worker:
-        worker_info = {"deploy_solver_backends": ["metal"], "backends": {"metal": {"available": True}}}
+        worker_info = {"deploy_solver_backends": [backend], "backends": {backend: {"available": True}}}
 
         def ensure_started(self):
             pass
@@ -477,4 +482,32 @@ def test_metal_ready_worker_is_accepted():
         def terminate(self):
             pytest.fail("A ready worker should remain available")
 
-    deploy_worker._check_backend_capability(Worker(), "metal")
+    deploy_worker._check_backend_capability(Worker(), backend)
+
+
+@pytest.mark.parametrize("supported", [False, True])
+@pytest.mark.parametrize("available", [False, True])
+def test_rocm_detection_requires_deploy_support_and_functional_runtime(monkeypatch, supported, available):
+    monkeypatch.setattr(deploy_worker.sys, "platform", "win32")
+    stopped = []
+
+    class Probe:
+        def __init__(self, **kwargs):
+            self.backend = kwargs["julia_project"].name.removeprefix("julia_")
+            self.worker_info = {
+                "deploy_solver_backends": ["rocm"] if supported else ["cpu", "cuda"],
+                "backends": {self.backend: {"available": available and self.backend == "rocm"}},
+            }
+
+        def ensure_started(self):
+            pass
+
+        def terminate(self):
+            stopped.append(self.backend)
+
+    monkeypatch.setattr(deploy_worker, "BeatEngineWorkerProcess", Probe)
+    assert deploy_worker.detect_solver_backend() == ("rocm" if supported and available else "cpu")
+    assert stopped == ["cuda", "rocm"]
+    if not supported:
+        with pytest.raises(RuntimeError, match="does not support Deploy ROCm"):
+            deploy_worker._check_backend_capability(deploy_worker._worker("rocm"), "rocm")

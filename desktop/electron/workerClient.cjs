@@ -20,7 +20,7 @@ class DeployWorkerClient {
   }
 
   initializationMarker(backend) {
-    return this.initializationCache && ["cpu", "cuda", "metal"].includes(backend)
+    return this.initializationCache && ["cpu", "cuda", "metal", "rocm"].includes(backend)
       ? join(this.initializationCache, `initialized-${backend}.json`) : null;
   }
 

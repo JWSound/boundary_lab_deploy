@@ -108,7 +108,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
   const browserClipboard = useRef("");
   const [assetNotice, setAssetNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [solverBackend, setSolverBackend] = useState<"cpu" | "cuda" | "metal" | null>(null);
+  const [solverBackend, setSolverBackend] = useState<"cpu" | "cuda" | "metal" | "rocm" | null>(null);
   const [interfaceScale, setInterfaceScale] = useState(0.9);
   const [scaleSaving, setScaleSaving] = useState(false);
   const [panelWidths, setPanelWidths] = useState({ left: 280, right: 330 });
@@ -152,7 +152,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     }).catch(caught => { if (!disposed) setError(String(caught)); });
     return () => { disposed = true; };
   }, []);
-  const changeSolverBackend = async (backend: "cpu" | "cuda" | "metal") => {
+  const changeSolverBackend = async (backend: "cpu" | "cuda" | "metal" | "rocm") => {
     setPreferencesSaving(true);
     try {
       if (window.boundaryLabDesktop) await window.boundaryLabDesktop.setSolverBackend(backend);
