@@ -83,8 +83,28 @@ discover the standard system ROCm installation with the verifier's restricted
 PATH. A custom developer SDK path cannot substitute for the runtime's declared
 dependencies during this check.
 
-These options do not add ROCm dependencies to a bundle. The Windows runtime
-builder currently stages only the CPU and CUDA Julia environments, and the
-release lock still pins an engine without Deploy ROCm support. ROCm environment
-staging, the offline AMD library contract, a qualified immutable engine artifact,
+For a Windows runtime candidate, use `python scripts/build_runtime.py --include-rocm
+--output build/rocm-resources` with the required Python 3.13 build interpreter.
+This stages the engine's `julia_rocm` environment alongside CPU/CUDA. The builder
+requires the pinned ROCm Julia manifest, AMDGPU package files, the AMDGPU LLVM
+linker artifact and ROCm device bitcode in the staged inventory. Bundle
+verification rechecks this inventory whenever ROCm is declared as staged,
+including CPU/CUDA smoke runs. The manifest records staged backends and the
+external system-library dependency. Staging does not itself prove that a backend
+is functional or that its solver supports Deploy requests.
+
+The current AMDGPU Windows contract uses a standard system ROCm SDK installation
+for HIP (`amdhip64`), rocBLAS and rocSOLVER. Those libraries and the GPU driver
+are not supplied by this option. Compiler and device-bitcode artifacts are staged
+for offline use. The build and verification environments clear developer ROCm
+paths and device overrides. ROCm builds instantiate into a fresh Julia staging
+depot so developer packages and artifact overrides cannot supply dependencies.
+Qualify the resulting bundle with the commands above
+after relocation, on the intended SDK/driver/GPU combination.
+
+The release lock still pins an engine without Deploy ROCm support. A qualified
+immutable engine artifact and release-pin update, offline AMD library discovery,
 and actual installed-runtime qualification remain required before an AMD release.
+
+See [the staging qualification record](rocm-runtime-staging.md) for the completed
+build, relocation and offline AMD dependency checks and their scope.

@@ -98,6 +98,25 @@ def test_developer_rocm_overrides_do_not_reach_bundle_verification(bundle, monke
         assert environment["JULIA_PKG_OFFLINE"] == "true"
 
 
+def test_declared_rocm_bundle_rejects_missing_compiler_before_worker_start(bundle, monkeypatch):
+    main, resources, user = bundle
+    manifest_path = resources / "runtime-manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["staged_backends"] = ["cpu", "cuda", "rocm"]
+    manifest_path.write_text(json.dumps(manifest))
+    depot = resources / "runtime/julia-depot"
+    depot.mkdir(parents=True)
+    (depot / "inventory.toml").write_text("[packages]\n[artifacts]\n")
+
+    def unexpected_run(*args, **kwargs):
+        pytest.fail("An incomplete declared ROCm bundle must fail before launching the worker")
+
+    monkeypatch.setattr(subprocess, "run", unexpected_run)
+    with pytest.raises(RuntimeError, match="Incomplete ROCm"):
+        main()
+    assert not (user / "verification.json").exists()
+
+
 @pytest.mark.parametrize("failure", ["solver", "resource-mutation"])
 def test_failed_rocm_qualification_never_writes_success_report(bundle, monkeypatch, failure):
     main, resources, user = bundle

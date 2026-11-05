@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tomllib
 import urllib.request
 import uuid
 import zipfile
@@ -53,9 +54,61 @@ def validate_cuda_inventory(files):
         raise RuntimeError("Incomplete CUDA runtime bundle: missing " + ", ".join(missing))
 
 
+def runtime_projects(engine, include_rocm=False):
+    names = ["julia_local", "julia_cuda"] + (["julia_rocm"] if include_rocm else [])
+    projects = [engine / name for name in names]
+    for project in projects:
+        if not (project / "Project.toml").is_file():
+            raise RuntimeError(f"Engine wheel is missing the {project.name} environment")
+        if project.name == "julia_rocm" and not (project / "Manifest.toml").is_file():
+            raise RuntimeError("Engine wheel is missing the pinned julia_rocm Manifest.toml")
+    return projects
+
+
+def validate_rocm_inventory(files, inventory):
+    """Check staged compiler assets separately from the external system SDK."""
+    paths = {str(name).replace("\\", "/") for name in files}
+    packages = inventory.get("packages", {})
+    required = {"AMDGPU", "AMDGPU_LLVM_Backend_jll", "ROCmDeviceLibs_jll"}
+    names = {entry.get("name") for entry in packages.values()}
+    missing = sorted(required - names)
+    for name in required & names:
+        prefix = f"runtime/julia-depot/packages/{name}/"
+        if not any(path.startswith(prefix) and path.endswith("/Project.toml") for path in paths):
+            missing.append(f"{name} package files")
+    for artifact, suffix in (("AMDGPU_LLVM_Backend", "/bin/lld.exe"), ("ROCmDeviceLibs", ".bc")):
+        hashes = [key for key, value in inventory.get("artifacts", {}).items() if value == artifact]
+        if not any(path.startswith(f"runtime/julia-depot/artifacts/{value}/") and path.endswith(suffix)
+                   for value in hashes for path in paths):
+            missing.append(artifact + " artifact files")
+    for name in ("Project.toml", "Manifest.toml"):
+        if f"runtime/python/Lib/site-packages/beat_engine/julia_rocm/{name}" not in paths:
+            missing.append(f"julia_rocm {name}")
+    if missing:
+        raise RuntimeError("Incomplete ROCm runtime bundle: missing " + ", ".join(missing))
+
+
+def staging_environment(rocm_depot=None):
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.upper().startswith(("JULIA_PROJECT", "JULIA_LOAD_PATH", "JULIA_CUDA", "BLAB_",
+                                       "ROCM_", "HIP_", "HSA_", "ROCR_"))
+        and key.upper() not in {"DEVICE_LIB_PATH", "GPU_DEVICE_ORDINAL"}
+        and not (rocm_depot is not None and key.upper() == "JULIA_DEPOT_PATH")
+    }
+    environment.update(JULIA_PKG_PRECOMPILE_AUTO="0", JULIA_CPU_TARGET="generic", JULIA_LOAD_PATH="@;@stdlib")
+    if rocm_depot is not None:
+        # No trailing separator: exclude the developer depot and artifact overrides.
+        environment["JULIA_DEPOT_PATH"] = str(rocm_depot)
+    return environment
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=ROOT / "build/resources")
+    parser.add_argument("--include-rocm", action="store_true",
+                        help="Stage ROCm Julia/compiler dependencies in addition to CPU/CUDA; system ROCm SDK required")
     args = parser.parse_args()
     if sys.platform != "win32" or sys.version_info[:2] != (3, 13):
         parser.error("Build this target with 64-bit Python 3.13 on Windows.")
@@ -112,20 +165,15 @@ def main():
     # Explicit isolated sys.path; no registry, PYTHONPATH, user site or pip at runtime.
     (python / "python313._pth").write_text("python313.zip\n.\nLib/site-packages\n", encoding="utf-8")
     engine = site / "beat_engine"
-    environment = {
-        key: value
-        for key, value in os.environ.items()
-        if not key.upper().startswith(("JULIA_PROJECT", "JULIA_LOAD_PATH", "JULIA_CUDA", "BLAB_"))
-    }
-    environment.update(JULIA_PKG_PRECOMPILE_AUTO="0", JULIA_CPU_TARGET="generic", JULIA_LOAD_PATH="@;@stdlib")
+    rocm_depot = ROOT / "build/julia-staging" / uuid.uuid4().hex if args.include_rocm else None
+    environment = staging_environment(rocm_depot)
     run(
         julia / "bin/julia.exe",
         "--startup-file=no",
         ROOT / "packaging/stage_depot.jl",
         runtime / "julia-depot",
         lock["cuda_runtime"],
-        engine / "julia_local",
-        engine / "julia_cuda",
+        *runtime_projects(engine, args.include_rocm),
         env=environment,
     )
     shutil.copytree(ROOT / "desktop/library", output / "library", dirs_exist_ok=True)
@@ -133,6 +181,9 @@ def main():
     # Full inventory also makes installed-resource mutation detectable in relocation tests.
     files = {str(p.relative_to(output)).replace("\\", "/"): digest(p) for p in sorted(output.rglob("*")) if p.is_file()}
     validate_cuda_inventory(files)
+    if args.include_rocm:
+        inventory = tomllib.loads((runtime / "julia-depot/inventory.toml").read_text(encoding="utf-8"))
+        validate_rocm_inventory(files, inventory)
     identity = hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()[:16]
     manifest = {
         "schema_version": 1,
@@ -140,7 +191,15 @@ def main():
         "components": lock,
         "files": files,
         "wheels": {p.name: digest(p) for p in sorted(wheels.glob("*.whl"))},
+        "staged_backends": ["cpu", "cuda"] + (["rocm"] if args.include_rocm else []),
     }
+    if args.include_rocm:
+        manifest["rocm_system_dependencies"] = {
+            "discovery": "AMDGPU standard Windows system ROCm SDK discovery",
+            "libraries": ["amdhip64", "rocblas", "rocsolver"],
+            "bundled": False,
+            "qualification": "Requires offline relocated and installed-runtime CPU/ROCm solve checks",
+        }
     complete.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print("Runtime complete:", output, flush=True)
 

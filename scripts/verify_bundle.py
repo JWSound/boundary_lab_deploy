@@ -10,10 +10,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 import uuid
 from pathlib import Path
 
-from build_runtime import validate_cuda_inventory
+from build_runtime import validate_cuda_inventory, validate_rocm_inventory
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -50,6 +51,9 @@ def main():
     windows = target == "win32"
     if windows:
         validate_cuda_inventory(manifest["files"])
+        if "rocm" in manifest.get("staged_backends", []):
+            inventory = tomllib.loads((destination / "runtime/julia-depot/inventory.toml").read_text(encoding="utf-8"))
+            validate_rocm_inventory(manifest["files"], inventory)
     backend = args.backend or ("cuda" if windows else "metal")
     qualification_gpu = backend if backend != "cpu" else ("cuda" if windows else "metal")
     qualification_mode = {"cuda": "both", "metal": "cpu-metal", "rocm": "cpu-rocm"}[qualification_gpu]
