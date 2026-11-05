@@ -80,8 +80,13 @@ def main():
     temp.mkdir(exist_ok=True)
     if not windows:
         atexit.register(shutil.rmtree, temp, ignore_errors=True)
+    # AMDGPU discovers the standard system ROCm installation on Windows. Do not
+    # let developer library paths, device masks or architecture overrides make
+    # an incomplete bundle appear qualified on this machine.
     environment = {key: value for key, value in os.environ.items()
-                   if not key.upper().startswith(("PYTHON", "JULIA", "DEPLOY_", "BLAB_", "CUDA_PATH", "CUDA_HOME", "DYLD_", "LD_LIBRARY_PATH"))}
+                   if not key.upper().startswith(("PYTHON", "JULIA", "DEPLOY_", "BLAB_", "CUDA_PATH", "CUDA_HOME",
+                                                   "ROCM_", "HIP_", "HSA_", "ROCR_", "DYLD_", "LD_LIBRARY_PATH"))
+                   and key.upper() not in {"DEVICE_LIB_PATH", "GPU_DEVICE_ORDINAL"}}
     runtime = destination / "runtime"
     environment.update(
         PATH=str(Path(os.environ["SystemRoot"]) / "System32") if windows else "/usr/bin:/bin:/usr/sbin:/sbin",

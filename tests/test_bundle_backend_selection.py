@@ -66,6 +66,38 @@ def test_requested_backend_reaches_bundled_commands_and_report(bundle, monkeypat
     assert report["resources_unchanged"] is True
 
 
+def test_developer_rocm_overrides_do_not_reach_bundle_verification(bundle, monkeypatch):
+    main, resources, user = bundle
+    sys.argv.extend(["--backend", "rocm"])
+    overrides = {
+        "ROCM_PATH": "developer-sdk", "HIP_PATH": "developer-hip",
+        "HIP_DEVICE_LIB_PATH": "developer-bitcode", "DEVICE_LIB_PATH": "other-bitcode",
+        "HSA_OVERRIDE_GFX_VERSION": "10.3.0", "HIP_VISIBLE_DEVICES": "9",
+        "ROCR_VISIBLE_DEVICES": "9", "GPU_DEVICE_ORDINAL": "9",
+        "HIP_LAUNCH_BLOCKING": "1", "rocm_custom_override": "mixed-case",
+    }
+    for key, value in overrides.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("DEPLOY_VERIFICATION_TEST_SENTINEL", "must-be-cleared")
+    monkeypatch.setenv("USER_TEST_SENTINEL", "keep")
+    environments = []
+
+    def run(command, **kwargs):
+        environments.append(kwargs["env"])
+        return SimpleNamespace(stdout='{"type":"ready"}\n')
+
+    monkeypatch.setattr(subprocess, "run", run)
+    main()
+    assert len(environments) == 3
+    for environment in environments:
+        normalized = {key.upper(): value for key, value in environment.items()}
+        assert not {key.upper() for key in overrides}.intersection(normalized)
+        assert "DEPLOY_VERIFICATION_TEST_SENTINEL" not in environment
+        assert environment["USER_TEST_SENTINEL"] == "keep"
+        assert environment["PATH"] == str(Path(normalized["SYSTEMROOT"]) / "System32")
+        assert environment["JULIA_PKG_OFFLINE"] == "true"
+
+
 @pytest.mark.parametrize("failure", ["solver", "resource-mutation"])
 def test_failed_rocm_qualification_never_writes_success_report(bundle, monkeypatch, failure):
     main, resources, user = bundle

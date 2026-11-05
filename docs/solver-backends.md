@@ -77,6 +77,12 @@ qualification script. Its report records the selected solve and qualification
 backends. The existing Windows default remains CPU/CUDA; `--backend cpu` selects
 a CPU smoke solve while retaining the platform GPU for full qualification.
 
+Verification clears inherited ROCm/HIP library paths, device masks and HSA
+architecture overrides as well as Python/Julia settings. On Windows, AMDGPU must
+discover the standard system ROCm installation with the verifier's restricted
+PATH. A custom developer SDK path cannot substitute for the runtime's declared
+dependencies during this check.
+
 These options do not add ROCm dependencies to a bundle. The Windows runtime
 builder currently stages only the CPU and CUDA Julia environments, and the
 release lock still pins an engine without Deploy ROCm support. ROCm environment
