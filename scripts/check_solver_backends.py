@@ -22,14 +22,14 @@ from boundary_deploy.solve import (
     prepare_deploy_rom_request,
     prepare_deploy_solve_request,
 )
-from boundary_deploy.worker import _worker
+from boundary_deploy.worker import _check_backend_capability, _worker
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--library", type=Path, default=Path(__file__).resolve().parents[1] / "desktop/library")
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--backend", choices=("cpu", "cuda", "metal", "both", "cpu-metal"), default="both")
+    parser.add_argument("--backend", choices=("cpu", "cuda", "metal", "rocm", "both", "cpu-metal", "cpu-rocm"), default="both")
     parser.add_argument("--scene", choices=("single", "mixed-close-ground"), default="single")
     args = parser.parse_args()
     args.output = args.output.resolve()
@@ -91,11 +91,12 @@ def main():
         return np.asarray(value["real"]) + 1j * np.asarray(value["imag"])
 
     results = {}
-    backends = {"both": ("cpu", "cuda"), "cpu-metal": ("cpu", "metal")}.get(args.backend, (args.backend,))
+    backends = {"both": ("cpu", "cuda"), "cpu-metal": ("cpu", "metal"), "cpu-rocm": ("cpu", "rocm")}.get(args.backend, (args.backend,))
     for backend in backends:
         worker = _worker(backend)
         cache = DeploySolveCache()
         try:
+            _check_backend_capability(worker, backend)
             packages = scene_packages(payload, cache)
             frequencies = common_frequencies(packages, coupled=True)
             index = len(frequencies) // 2
@@ -114,6 +115,12 @@ def main():
                             if event.get("type") == "result":
                                 value = event["result"]
                                 assert np.isfinite(pressure(value)).all()
+                                diagnostics = value["diagnostics"]
+                                assert diagnostics["backend"] == backend
+                                if backend == "rocm" and not diagnostics.get("field_only", False):
+                                    assert diagnostics["linear_solver"] == "rocm_rocsolver_dense_lu"
+                                    assert diagnostics["dense_factorization_precision"] == "float64"
+                                    assert diagnostics["field_backend"] == "rocm"
                                 values.append(value)
                     assert values, "No result"
                     return values

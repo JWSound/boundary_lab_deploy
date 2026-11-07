@@ -18,7 +18,8 @@ test('recursive discovery, invalid packages, updates and removal do not mutate p
   await library.scan();
   await mkdir(join(managed, 'sub'));
   const path = join(managed, 'sub', 'speaker.blabsp');
-  await writeFile(path, packageBytes('Original'));
+  const original = packageBytes('Original');
+  await writeFile(path, original);
   await writeFile(join(managed, 'broken.blabsp'), 'not a zip');
   let snapshot = await library.scan();
   assert.equal(snapshot.entries.length, 2);
@@ -30,7 +31,7 @@ test('recursive discovery, invalid packages, updates and removal do not mutate p
   assert.equal(snapshot.entries.find(e => e.path === path).name, 'Updated');
   assert.notEqual(snapshot.entries.find(e => e.path === path).fingerprint, entry.fingerprint);
   await assert.rejects(library.read(path, entry.fingerprint), /changed/);
-  assert.deepEqual(await readFile(selection.path), Buffer.from(packageBytes('Original')));
+  assert.deepEqual(await readFile(selection.path), Buffer.from(original));
   await rm(path);
   assert.equal((await library.scan()).entries.length, 1);
   assert.ok((await readFile(selection.path)).length);
@@ -43,12 +44,13 @@ test('imports preserve originals, deduplicate content and never overwrite filena
   const first = await library.import([external]);
   const repeated = await library.import([external]);
   assert.equal(first.results[0].destination, repeated.results[0].destination);
-  await writeFile(external, packageBytes('Second'));
+  const second = packageBytes('Second');
+  await writeFile(external, second);
   const changed = await library.import([external, join(root, 'missing.blabsp')]);
   assert.notEqual(first.results[0].destination, changed.results[0].destination);
   assert.deepEqual(await readFile(first.results[0].destination), Buffer.from(original));
   assert.ok(changed.results[1].error);
-  assert.deepEqual(await readFile(external), Buffer.from(packageBytes('Second')));
+  assert.deepEqual(await readFile(external), Buffer.from(second));
 });
 test('folder choice persists and missing chosen folders are reported without recreation', async t => {
   const { root, library, builtin } = await fixture(t);

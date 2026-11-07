@@ -43,3 +43,13 @@ test("pending identical requests share one warning and cancellation",async()=>{
   await new Promise(r=>setImmediate(r));resolve({response:0});
   assert.deepEqual(await Promise.all([a,b]),[false,false]);assert.equal(prompts,1);
 });
+test("ROCm accepts dedicated-memory estimates without querying NVIDIA capacity",async()=>{
+  const detected=await detectMemory("rocm",async()=>{assert.fail("ROCm must not use NVIDIA memory");});
+  assert.equal(detected.gpu,null);
+  assert.ok(detected.ram>0);
+  const guard=new SolverMemoryGuard(async()=>({ram:16*GiB,gpu:null}));
+  assert.equal(await guard.check(1,{...request,backend:"rocm",systemUpper:20*GiB},async options=>{
+    assert.match(options.detail,/only RAM was checked/);
+    return {response:0};
+  }),false);
+});

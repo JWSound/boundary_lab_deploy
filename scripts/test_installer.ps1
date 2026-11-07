@@ -1,6 +1,8 @@
 param(
     [string]$Installer = "",
-    [switch]$QualifyBackends
+    [switch]$QualifyBackends,
+    [ValidateSet("cuda", "rocm")]
+    [string]$Backend = "cuda"
 )
 $ErrorActionPreference = "Stop"
 $deployRoot = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
@@ -31,8 +33,8 @@ try {
     if (-not ($report.packaged -and $report.workerReady -and $report.canvas)) { throw "Installed app report is incomplete" }
     $report | ConvertTo-Json
     if ($QualifyBackends) {
-        python (Join-Path $PSScriptRoot "verify_bundle.py") --resources (Join-Path $testRoot "resources") --in-place --solve --qualify-backends
-        if ($LASTEXITCODE -ne 0) { throw "Installed CPU/CUDA qualification failed" }
+        python (Join-Path $PSScriptRoot "verify_bundle.py") --resources (Join-Path $testRoot "resources") --in-place --solve --qualify-backends --backend $Backend
+        if ($LASTEXITCODE -ne 0) { throw "Installed CPU/$Backend qualification failed" }
     }
 } finally {
     $registration = Get-ItemProperty -Path $registryRoots -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -match "^Boundary Lab Deploy(?: |$)" }

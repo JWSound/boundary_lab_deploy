@@ -1,12 +1,12 @@
 import { useEffect, useRef } from "react";
 
 export function SolverPreferencesDialog({ backend, busy, interfaceScale, scaleBusy, onScaleChange, onChange, onClose }: {
-  backend: "cpu" | "cuda" | "metal" | null;
+  backend: "cpu" | "cuda" | "metal" | "rocm" | null;
   busy: boolean;
   interfaceScale: number;
   scaleBusy: boolean;
   onScaleChange?: (scale: number) => void;
-  onChange: (backend: "cpu" | "cuda" | "metal") => void;
+  onChange: (backend: "cpu" | "cuda" | "metal" | "rocm") => void;
   onClose: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -25,10 +25,11 @@ export function SolverPreferencesDialog({ backend, busy, interfaceScale, scaleBu
     <h3>Solver</h3>
     <label htmlFor="solver-backend">Solver backend</label>
     <select id="solver-backend" value={backend ?? ""} disabled={busy || backend === null}
-      onChange={event => onChange(event.target.value as "cpu" | "cuda" | "metal")}>
+      onChange={event => onChange(event.target.value as "cpu" | "cuda" | "metal" | "rocm")}>
       {backend === null && <option value="">Checking availability...</option>}
       <option value="cuda">CUDA (NVIDIA GPU)</option>
       <option value="metal">Metal (Apple Silicon GPU)</option>
+      <option value="rocm">ROCm (AMD GPU)</option>
       <option value="cpu">CPU</option>
     </select>
     <p>Used for Boundary and Coupled solves.</p>

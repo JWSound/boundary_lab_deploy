@@ -39,9 +39,9 @@ for project in ARGS[3:end]
         end
         records["packages"][string(uuid)] = Dict("name" => info.name, "version" => string(info.version), "tree" => string(info.tree_hash))
         selected = Pkg.Operations.collect_artifacts(source; include_lazy=true)
-        if info.name in ("CUDA_Runtime_jll", "CUDA_Compiler_jll") &&
+        if info.name in ("CUDA_Runtime_jll", "CUDA_Compiler_jll", "AMDGPU_LLVM_Backend_jll", "ROCmDeviceLibs_jll") &&
            !any(!isempty(artifacts) for (_, artifacts) in selected)
-            error("No artifacts selected for $(info.name); refusing an incomplete CUDA bundle")
+            error("No artifacts selected for $(info.name); refusing an incomplete accelerator bundle")
         end
         for (toml, artifacts) in selected
             for (name, meta) in artifacts

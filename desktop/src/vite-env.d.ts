@@ -39,7 +39,7 @@ interface DesktopLevel2SolveRequest {
   packagePath: string;
   packagePaths?: Record<string, string>;
   frequencyHz: number;
-  backend: "cuda" | "cpu" | "metal";
+  backend: "cuda" | "cpu" | "metal" | "rocm";
   fidelity?: "boundary" | "coupled";
   sources: import("./model/types").SourceConfiguration[];
   rigidObjects: DesktopRigidObject[];
@@ -59,7 +59,7 @@ interface DesktopSolveStatus {
 interface DesktopMicrophoneSweepRequest {
   packagePath: string;
   packagePaths?: Record<string, string>;
-  backend: "cuda" | "cpu" | "metal";
+  backend: "cuda" | "cpu" | "metal" | "rocm";
   fidelity: "boundary" | "coupled";
   sources: import("./model/types").SourceConfiguration[];
   rigidObjects: DesktopRigidObject[];
@@ -93,9 +93,9 @@ interface Window {
     importLibraryAssets: (paths?: string[]) => Promise<{ snapshot: LibrarySnapshot; results: { path: string; destination?: string; error?: string }[] }>;
     getInterfaceScale?: () => Promise<number>;
     setInterfaceScale?: (scale: number) => Promise<number>;
-    confirmSolverMemory?: (estimate: { backend: "cpu" | "cuda" | "metal"; fidelity: "boundary" | "coupled"; systemUpper: number; gpuUpper: number }) => Promise<boolean>;
-    getSolverBackend: () => Promise<"cpu" | "cuda" | "metal">;
-    setSolverBackend: (backend: "cpu" | "cuda" | "metal") => Promise<"cpu" | "cuda" | "metal">;
+    confirmSolverMemory?: (estimate: { backend: "cpu" | "cuda" | "metal" | "rocm"; fidelity: "boundary" | "coupled"; systemUpper: number; gpuUpper: number }) => Promise<boolean>;
+    getSolverBackend: () => Promise<"cpu" | "cuda" | "metal" | "rocm">;
+    setSolverBackend: (backend: "cpu" | "cuda" | "metal" | "rocm") => Promise<"cpu" | "cuda" | "metal" | "rocm">;
     readSceneClipboard: () => Promise<string>;
     writeSceneClipboard: (text: string) => Promise<void>;
     loadBundledExample: () => Promise<DesktopPackageSelection | null>;

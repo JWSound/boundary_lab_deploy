@@ -1,10 +1,25 @@
 # Solver backends
 
-Preferences (the top-right settings button) selects CPU, NVIDIA CUDA, or Apple Metal for Boundary and Coupled solves, microphone sweeps, and audience-plane updates. The choice is saved in `solver-preferences.json` under Electron's user-data directory, independently of projects. Metal requires an engine candidate with Deploy Metal support; see [macOS development](macos.md).
+Preferences (the top-right settings button) selects CPU, NVIDIA CUDA, AMD ROCm, or Apple Metal for Boundary and Coupled solves, microphone sweeps, and audience-plane updates. The choice is saved in `solver-preferences.json` under Electron's user-data directory, independently of projects. ROCm requires an engine candidate advertising Deploy ROCm support; the currently pinned 0.5.1 wheel does not provide this path. Metal requires an engine candidate with Deploy Metal support; see [macOS development](macos.md).
 
-On first launch, Deploy probes the native accelerator's versioned worker handshake: Metal on Apple Silicon, CUDA on Windows/Linux, CPU on Intel Macs. Metal must advertise Deploy solver support as well as a functional device. Unavailable accelerators fall back to CPU. Later launches retain the saved choice. Selecting a backend is disabled during a running solve or sweep. Switching backends invalidates the desktop result identity and uses the corresponding engine worker.
+On first launch, Deploy probes the native accelerator's versioned worker handshake: Metal on Apple Silicon, CUDA then ROCm on Windows/Linux, CPU on Intel Macs. Metal and ROCm must advertise Deploy solver support as well as a functional device and required solver libraries. Unavailable accelerators fall back to CPU. Later launches retain the saved choice. Selecting a backend is disabled during a running solve or sweep. Switching backends invalidates the desktop result identity and uses the corresponding engine worker.
 
 The CPU coupled path uses the exported parity Petrov-Galerkin speaker ROM, the CPU exterior Burton-Miller operators, one exterior LU factorization per frequency, and a host-array GMRES feedback solve. It preserves the same ROM response, phasor convention, field reuse, and sweep warm-start contracts as CUDA.
+
+The ROCm path assembles native boundary operators and evaluates fields on the AMD
+GPU. Boundary and Coupled solves use one ComplexF64 rocSOLVER factorization per
+frequency; requested-precision operators remain resident during repeated solves.
+Coupled ROM response and GMRES vectors remain on the host, with the GPU factors
+reused for every feedback application. Cached audience fields and frequency-sweep
+geometry use backend-specific caches. CUDA-specific projected/compressed RHS and
+factor-reuse experiments remain CUDA-specific; they are not required for the
+standard CPU/ROCm workflows.
+
+The desktop shows separate RAM and VRAM estimates for ROCm's retained operators
+and Float64 factors. These are uncalibrated working-set ranges. AMD VRAM capacity
+is not currently queried by the desktop memory guard; it does not use NVIDIA
+capacity as a substitute. Runtime qualification is still required for each target
+GPU/driver configuration.
 
 ## Development and release dependency
 
@@ -18,11 +33,18 @@ Run from the Deploy development environment:
 
 ```powershell
 python scripts/check_solver_backends.py --output runs/backend-qualification --backend both
+python scripts/check_solver_backends.py --output runs/rocm-qualification --backend cpu-rocm
+python scripts/check_solver_backends.py --output runs/rocm-mixed --backend cpu-rocm --scene mixed-close-ground
 python scripts/smoke_solver.py --backend cpu --output runs/mixed-cpu
 python scripts/smoke_solver.py --backend cuda --output runs/mixed-cuda
 ```
 
 The first command runs Boundary and Coupled solves, cached field evaluation, and two-frequency sweeps, checks CPU/CUDA complex-pressure agreement within a relative norm tolerance of 0.0005, and checks coupled convergence and sweep warm starts. It writes request/result artifacts under the requested new directory. The mixed smoke commands use two different speaker packages.
+
+The `cpu-rocm` commands apply the same comparisons to ROCm, including complex
+diaphragm velocity and coil current. They also verify capability negotiation and
+actual ROCm dense-solver/factor-precision/field diagnostics. The mixed scene
+exercises near corrections between different cabinets and their ground images.
 
 Also run Python tests, the desktop build, `npm run test:runtime`, and `npm run test:editing-ui`. Engine changes require the Julia reference gate and CPU GMRES tests. Qualify the final installer on a machine without NVIDIA hardware before publishing; development CPU tests and a CUDA-hidden availability probe do not replace installed-runtime qualification.
 
@@ -42,3 +64,56 @@ After building the installer, `./scripts/test_installer.ps1 -QualifyBackends`
 installs it into a guarded temporary directory, verifies app launch and offline
 CPU/CUDA numerical execution, then uninstalls that test copy. It refuses to
 replace an existing Deploy installation.
+
+For an AMD runtime candidate, select ROCm explicitly:
+
+```powershell
+python scripts/verify_bundle.py --resources build/resources --solve --qualify-backends --backend rocm --scene mixed-close-ground
+./scripts/test_installer.ps1 -QualifyBackends -Backend rocm
+```
+
+The bundle verifier passes ROCm to the smoke solve and CPU/ROCm to the full
+qualification script. Its report records the selected solve and qualification
+backends. The existing Windows default remains CPU/CUDA; `--backend cpu` selects
+a CPU smoke solve while retaining the platform GPU for full qualification.
+
+Verification clears inherited ROCm/HIP library paths, device masks and HSA
+architecture overrides as well as Python/Julia settings. On Windows, AMDGPU must
+discover the standard system ROCm installation with the verifier's restricted
+PATH. A custom developer SDK path cannot substitute for the runtime's declared
+dependencies during this check.
+
+For a Windows runtime candidate, use `python scripts/build_runtime.py --include-rocm
+--output build/rocm-resources` with the required Python 3.13 build interpreter.
+This stages the engine's `julia_rocm` environment alongside CPU/CUDA. The builder
+also accepts `--runtime-lock path/to/candidate-lock.json` to qualify an immutable
+candidate engine artifact without editing the checked-in release lock. Copy the
+release lock and replace `beat_requirement` with the candidate wheel URL and its
+SHA-256 fragment. The selected lock is recorded in the runtime manifest along
+with installed wheel hashes. A local wheel is suitable for machine-local
+qualification; it is not a distributable release dependency. Candidate testing
+does not update the application's declared dependency or qualify a release pin.
+
+The builder
+requires the pinned ROCm Julia manifest, AMDGPU package files, the AMDGPU LLVM
+linker artifact and ROCm device bitcode in the staged inventory. Bundle
+verification rechecks this inventory whenever ROCm is declared as staged,
+including CPU/CUDA smoke runs. The manifest records staged backends and the
+external system-library dependency. Staging does not itself prove that a backend
+is functional or that its solver supports Deploy requests.
+
+The current AMDGPU Windows contract uses a standard system ROCm SDK installation
+for HIP (`amdhip64`), rocBLAS and rocSOLVER. Those libraries and the GPU driver
+are not supplied by this option. Compiler and device-bitcode artifacts are staged
+for offline use. The build and verification environments clear developer ROCm
+paths and device overrides. ROCm builds instantiate into a fresh Julia staging
+depot so developer packages and artifact overrides cannot supply dependencies.
+Qualify the resulting bundle with the commands above
+after relocation, on the intended SDK/driver/GPU combination.
+
+The release lock still pins an engine without Deploy ROCm support. A qualified
+immutable engine artifact and release-pin update, offline AMD library discovery,
+and actual installed-runtime qualification remain required before an AMD release.
+
+See [the staging qualification record](rocm-runtime-staging.md) for the completed
+build, relocation and offline AMD dependency checks and their scope.

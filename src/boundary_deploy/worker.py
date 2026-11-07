@@ -58,8 +58,8 @@ def _emit(event_type: str, *, request_id: object | None = None, **values: Any) -
 
 def _worker(backend: str) -> BeatEngineWorkerProcess:
     normalized = backend.strip().lower()
-    if normalized not in {"cuda", "cpu", "metal"}:
-        raise ValueError("Deploy worker backend must be cuda, cpu or metal.")
+    if normalized not in {"cuda", "cpu", "metal", "rocm"}:
+        raise ValueError("Deploy worker backend must be cuda, cpu, metal or rocm.")
     project = engine_paths(normalized).project
     return BeatEngineWorkerProcess(
         julia_executable=os.environ.get("DEPLOY_JULIA_EXE", os.environ.get("BLAB_JULIA_EXE", "julia")),
@@ -71,15 +71,16 @@ def _worker(backend: str) -> BeatEngineWorkerProcess:
 
 def _check_backend_capability(worker: BeatEngineWorkerProcess, backend: str) -> None:
     """Check after registration, so cancellation can terminate a starting worker."""
-    if backend == "metal":
+    if backend in {"metal", "rocm"}:
+        label = "Metal" if backend == "metal" else "ROCm"
         try:
             worker.ensure_started()
-            if "metal" not in (worker.worker_info or {}).get("deploy_solver_backends", []):
-                raise RuntimeError("This BEAT Engine does not support Deploy Metal solves. Install a Deploy-Metal-capable engine release or select CPU.")
-            availability = (worker.worker_info or {}).get("backends", {}).get("metal", {})
+            if backend not in (worker.worker_info or {}).get("deploy_solver_backends", []):
+                raise RuntimeError(f"This BEAT Engine does not support Deploy {label} solves. Install a Deploy-{label}-capable engine release or select CPU.")
+            availability = (worker.worker_info or {}).get("backends", {}).get(backend, {})
             if availability.get("available") is not True:
-                reason = availability.get("reason") or "The worker did not confirm a functional Metal runtime/device."
-                raise RuntimeError(f"Metal solver initialization failed: {reason}")
+                reason = availability.get("reason") or f"The worker did not confirm a functional {label} runtime/device."
+                raise RuntimeError(f"{label} solver initialization failed: {reason}")
         except Exception:
             worker.terminate()
             raise
@@ -90,27 +91,31 @@ def detect_solver_backend() -> str:
     if sys.platform == "darwin":
         if platform.machine().lower() not in {"arm64", "aarch64"}:
             return "cpu"
-        accelerator = "metal"
+        accelerators = ("metal",)
     else:
-        accelerator = "cuda"
-    paths = engine_paths(accelerator)
-    probe = BeatEngineWorkerProcess(
-        julia_executable=os.environ.get("DEPLOY_JULIA_EXE", os.environ.get("BLAB_JULIA_EXE", "julia")),
-        solver_script=paths.system_solver,
-        julia_threads="2",
-        julia_project=paths.project,
-    )
-    try:
-        probe.ensure_started()
-        info = probe.worker_info or {}
-        if accelerator == "metal" and "metal" not in info.get("deploy_solver_backends", []):
-            return "cpu"
-        return accelerator if info.get("backends", {}).get(accelerator, {}).get("available") is True else "cpu"
-    except Exception as exc:
-        print(f"{accelerator.upper()} availability check failed; using CPU: {exc}", file=sys.stderr)
-        return "cpu"
-    finally:
-        probe.terminate()
+        accelerators = ("cuda", "rocm")
+    for accelerator in accelerators:
+        probe = None
+        try:
+            paths = engine_paths(accelerator)
+            probe = BeatEngineWorkerProcess(
+                julia_executable=os.environ.get("DEPLOY_JULIA_EXE", os.environ.get("BLAB_JULIA_EXE", "julia")),
+                solver_script=paths.system_solver,
+                julia_threads="2",
+                julia_project=paths.project,
+            )
+            probe.ensure_started()
+            info = probe.worker_info or {}
+            if accelerator in {"metal", "rocm"} and accelerator not in info.get("deploy_solver_backends", []):
+                continue
+            if info.get("backends", {}).get(accelerator, {}).get("available") is True:
+                return accelerator
+        except Exception as exc:
+            print(f"{accelerator.upper()} availability check failed: {exc}", file=sys.stderr)
+        finally:
+            if probe is not None:
+                probe.terminate()
+    return "cpu"
 
 
 def _worker_key(payload: object) -> str:
