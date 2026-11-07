@@ -41,6 +41,10 @@ redistributed by the staging option.
 
 ## Qualification boundary
 
+The later [candidate runtime qualification](rocm-candidate-runtime.md) passes
+relocated Boundary/Coupled CPU/ROCm workflows with a locally built, hashed engine
+wheel. The original release-lock results below retain their narrower scope.
+
 The lock still selects BEAT v0.5.1. That wheel has a ROCm environment but lacks
 Deploy's native ROCm solve implementation. These checks establish runtime staging,
 relocated CPU execution and basic offline AMD dependency/compute operation on

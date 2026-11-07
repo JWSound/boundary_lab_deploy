@@ -86,6 +86,15 @@ dependencies during this check.
 For a Windows runtime candidate, use `python scripts/build_runtime.py --include-rocm
 --output build/rocm-resources` with the required Python 3.13 build interpreter.
 This stages the engine's `julia_rocm` environment alongside CPU/CUDA. The builder
+also accepts `--runtime-lock path/to/candidate-lock.json` to qualify an immutable
+candidate engine artifact without editing the checked-in release lock. Copy the
+release lock and replace `beat_requirement` with the candidate wheel URL and its
+SHA-256 fragment. The selected lock is recorded in the runtime manifest along
+with installed wheel hashes. A local wheel is suitable for machine-local
+qualification; it is not a distributable release dependency. Candidate testing
+does not update the application's declared dependency or qualify a release pin.
+
+The builder
 requires the pinned ROCm Julia manifest, AMDGPU package files, the AMDGPU LLVM
 linker artifact and ROCm device bitcode in the staged inventory. Bundle
 verification rechecks this inventory whenever ROCm is declared as staged,

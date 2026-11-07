@@ -107,12 +107,14 @@ def staging_environment(rocm_depot=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=ROOT / "build/resources")
+    parser.add_argument("--runtime-lock", type=Path, default=ROOT / "packaging/runtime-lock.json",
+                        help="Explicit candidate lock; defaults to the checked-in release lock")
     parser.add_argument("--include-rocm", action="store_true",
                         help="Stage ROCm Julia/compiler dependencies in addition to CPU/CUDA; system ROCm SDK required")
     args = parser.parse_args()
     if sys.platform != "win32" or sys.version_info[:2] != (3, 13):
         parser.error("Build this target with 64-bit Python 3.13 on Windows.")
-    lock = json.loads((ROOT / "packaging/runtime-lock.json").read_text())
+    lock = json.loads(args.runtime_lock.read_text())
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     complete = output / "runtime-manifest.json"
