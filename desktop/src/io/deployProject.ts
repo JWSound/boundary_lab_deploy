@@ -41,6 +41,7 @@ export interface DeployProject {
   heatmap_scale: PlaneScale;
   system_gain_db: number;
   selected_frequency_hz: number;
+  sweep_range_hz?: [number, number];
   requested_fidelity: Fidelity;
   scene_organization: SceneOrganization;
   analysis_captures: AnalysisCapture[];
@@ -321,6 +322,8 @@ export function parseDeployProject(contents: string): DeployProject {
   // Older files stored scales per plane; the first plane becomes the shared scale.
   const heatmapScale = project.heatmap_scale === undefined ? planeScale(audiencePlanes[0])
     : planeScale(observationPlane({ ...defaultObservation, ...record(project.heatmap_scale, "heatmap_scale") }));
+  const range = project.sweep_range_hz;
+  if (range !== undefined && (!Array.isArray(range) || range.length !== 2 || !range.every(v => typeof v === "number" && Number.isFinite(v) && v > 0) || range[1] <= range[0])) throw new Error("Invalid sweep_range_hz.");
   const frequencyHz = positive(project.selected_frequency_hz, "selected_frequency_hz");
   const systemGainDb = version < 9 ? 0 : finite(project.system_gain_db, "system_gain_db");
   if (systemGainDb < -60 || systemGainDb > 60) throw new Error("system_gain_db must be between -60 and 60 dB.");
@@ -350,6 +353,7 @@ export function parseDeployProject(contents: string): DeployProject {
     audience_planes: audiencePlanes.map(p => ({ ...p, ...heatmapScale })),
     heatmap_scale: heatmapScale,
     system_gain_db: systemGainDb,
+    sweep_range_hz: range as [number, number] | undefined,
     selected_frequency_hz: frequencyHz,
     requested_fidelity: requestedFidelity,
     scene_organization: parseOrganization(project.scene_organization, new Set([...sources, ...rigidObjects, ...microphones, ...audiencePlanes].map(o => o.id))),
@@ -372,6 +376,7 @@ export function createDeployProject(
   organization: SceneOrganization = emptyOrganization(),
   captures: AnalysisCapture[] = [],
   visibleCaptureIds: string[] = captures.map(c => c.id),
+  sweepRange?: [number, number],
 ): DeployProject {
   return {
     schema: DEPLOY_PROJECT_SCHEMA,
@@ -395,6 +400,7 @@ export function createDeployProject(
     audience_planes: (Array.isArray(observation) ? observation : [{ ...observation, id: "audience-plane", name: "Audience plane" }]).map(p => ({ ...p, ...heatmapScale })),
     heatmap_scale: heatmapScale,
     system_gain_db: systemGainDb,
+    sweep_range_hz: sweepRange,
     selected_frequency_hz: selectedFrequencyHz,
     requested_fidelity: requestedFidelity,
     scene_organization: parseOrganization(organization, new Set([...sources, ...rigidObjects, ...microphones, ...(Array.isArray(observation) ? observation : [{ id: "audience-plane" }])].map(o => o.id))),

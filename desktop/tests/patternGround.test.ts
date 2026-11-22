@@ -123,3 +123,22 @@ assert.deepEqual(scenePatternFrequencies([continuous, pkg]), [100]);
 assert.deepEqual(scenePatternFrequencies([pkg, continuous]), [100]);
 assert.throws(() => scenePatternFrequencies([continuous, pkg], [150]), /common scene/);
 assert.deepEqual(scenePatternFrequencies([continuous], [75, 152.5, 225]), [75, 152.5, 225]);
+
+const { frequencyDomain, selectFrequency, effectiveRange, sweepGrid } = await import("../src/model/frequencyDomain");
+const sampled = { ...pkg, manifest: { ...pkg.manifest, frequencies_hz: [60, 100, 200],
+  files: { ...pkg.manifest.files, coupled_model: { path: "", representation: "parity_petrov_galerkin_rom" } } } };
+const rom = { ...pkg, manifest: { ...pkg.manifest, frequencies_hz: [80, 120],
+  files: { ...pkg.manifest.files, coupled_model: { path: "", representation: "continuous_speaker_rom", frequency_band_hz: [75, 225] } } } };
+assert.deepEqual(frequencyDomain([continuous], "pattern").band, [75, 225]);
+assert.deepEqual(frequencyDomain([rom], "coupled").band, [75, 225]);
+assert.deepEqual(frequencyDomain([rom], "boundary").grid, [80, 120]);
+for (const placed of [[rom, sampled], [sampled, rom]]) {
+  assert.deepEqual(frequencyDomain(placed, "coupled"), { grid: [100, 200], band: null });
+}
+const points = sweepGrid([75, 300], 12);
+assert.equal(points.length, 25);
+assert.equal(points[0], 75);
+assert.equal(points.at(-1), 300);
+assert.ok(points.slice(1).every((p,i) => Math.abs(p / points[i] - 2 ** (1 / 12)) < 1e-10));
+assert.equal(selectFrequency(frequencyDomain([rom], "coupled"), 160.25), 160.25);
+assert.deepEqual(effectiveRange([75, 225], [50, 200]), [75, 200]);

@@ -20,6 +20,17 @@ are separate contracts; preserve old supported fixtures and test round trips.
 
 ## Scene frequency requests
 
+In a continuous Pattern or Coupled scene, the lower and upper handles select the
+response plot and sweep limits. The arrow above the track selects the observation
+plane frequency anywhere in the common validated band. The project stores both
+selections. Preferences sets the sweep density in points per octave (default
+12). Sweeps include both limits and use equal logarithmic steps. Moving the
+plane arrow leaves the response samples intact.
+
+The active fidelity determines which package data is evaluated. Sampled Level 2
+traces and legacy ROMs use a single handle on the shared discrete grid.
+
+
 For a coupled field solve, pass `frequencyHz`. For a coupled microphone or
 transducer sweep, pass a list in `frequenciesHz`. A scene of continuous Level 3
 interiors accepts frequencies throughout the intersection of their exported

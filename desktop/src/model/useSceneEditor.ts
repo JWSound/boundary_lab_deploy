@@ -13,7 +13,7 @@ export function useSceneEditor() {
       setSourceConfigs: field("sourceConfigs", "Edit speakers"), setRigidObjects: field("rigidObjects", "Edit rigid objects"),
       setMicrophones: field("microphones", "Edit microphones"), setChannels: field("channels", "Edit channels"),
       setAudiencePlanes: field("audiencePlanes", "Edit audience planes"), setActivePlaneId: field("activePlaneId", "", false), setProjectName: field("projectName", "Rename project"),
-      setFrequencyIndex: field("frequencyIndex", "Change frequency"), setFidelity: field("fidelity", "Change fidelity"),
+      setPlaneHz: field("planeHz", "Change frequency"), setFidelity: field("fidelity", "Change fidelity"),
       setSelectedInstances: field("selectedInstances", "", false), setActivePackageId: field("activePackageId", "", false),
       setActiveRigidMeshId: field("activeRigidMeshId", "", false), setActiveChannelId: field("activeChannelId", "", false),
     };

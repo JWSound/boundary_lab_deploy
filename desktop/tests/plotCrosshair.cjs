@@ -23,7 +23,9 @@ app.whenReady().then(async () => {
           rmsCurrentA:values,realPowerW:values,acousticResistance:values,acousticReactance:values,differentialPressurePa:values
         }]])};
         window.frequencyChanges=[];
-        window.renderPlot=(view)=>root.render(React.createElement(view==='excursion'?DriverExcursionPlot:ElectricalPlot,{
+        window.renderPlot=(view, continuous)=>root.render(React.createElement(view==='excursion'?DriverExcursionPlot:ElectricalPlot,{
+          continuous:continuous && {band:[20,320],range:[40,160],
+            onRange:value=>window.frequencyChanges.push(value),onPlane:value=>window.frequencyChanges.push(value)},
           data,view,coupledSelected:true,currentFrequencyHz:100,frequencyPosition:1,frequencyCount:3,frequencyValues:[20,100,1000],
           onFrequencyPositionChange:(value)=>window.frequencyChanges.push(value),canCalculate:true,calculating:false,completedCount:3,totalCount:3,onCalculateOrStop:()=>{}
         }));
@@ -89,6 +91,33 @@ app.whenReady().then(async () => {
       await frame();
       assert.equal(await win.webContents.executeJavaScript("document.querySelectorAll('.plot-crosshair').length"), 0, view);
     }
+    await win.webContents.executeJavaScript('window.frequencyChanges=[]; window.renderPlot("excursion",true)');
+    await frame();
+    const trackBounds = () => win.webContents.executeJavaScript(`(() => {
+      const {x,width} = document.querySelector('.frequency-track').getBoundingClientRect(); return [x,width];
+    })()`);
+    const initialBounds = await trackBounds();
+    for (const [label, position, expected] of [
+      ["Sweep lower limit", 0, [20,160]], ["Sweep upper limit",10000,[40,320]], ["Observation plane frequency",5050,81]
+    ]) {
+      const input = `document.querySelector('input[aria-label="${label}"]')`;
+      await win.webContents.executeJavaScript(`Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(${input},${position});
+        ${input}.dispatchEvent(new Event('input',{bubbles:true}));`);
+      await frame();
+      assert.deepEqual(await trackBounds(), initialBounds, "Track geometry stays fixed during preview");
+      await win.webContents.executeJavaScript(`${input}.dispatchEvent(new PointerEvent('pointerup',{bubbles:true}))`);
+      assert.deepEqual(await win.webContents.executeJavaScript('window.frequencyChanges.at(-1)'),expected,label);
+    }
+    const drag = await win.webContents.executeJavaScript(`(() => {
+      const input = document.querySelector('.plane-thumb'), r = input.getBoundingClientRect();
+      return { x: Math.round(r.left + 7 + (r.width - 14) * input.value / input.max), y: Math.round(r.top + r.height/2) };
+    })()`);
+    await win.webContents.executeJavaScript('window.frequencyChanges=[]');
+    win.webContents.sendInputEvent({type:"mouseDown", modifiers:["leftButtonDown"], ...drag, button:"left", clickCount:1});
+    win.webContents.sendInputEvent({type:"mouseMove", modifiers:["leftButtonDown"], x:drag.x+28, y:drag.y});
+    win.webContents.sendInputEvent({type:"mouseUp", x:drag.x+28, y:drag.y, button:"left", clickCount:1});
+    await frame();
+    assert.ok(await win.webContents.executeJavaScript('window.frequencyChanges.length === 1 && window.frequencyChanges[0] > 100'), "Raised plane thumb accepts a real pointer drag");
     console.log("Frequency layout, debounce, release, keyboard, unmount, and crosshair checks passed for all six speaker views.");
     app.exit(0);
   } catch (error) { console.error(error); app.exit(1); }

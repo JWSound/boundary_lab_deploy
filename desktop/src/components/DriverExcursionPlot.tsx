@@ -1,4 +1,4 @@
-import { FrequencySlider } from "./FrequencySlider";
+import { FrequencySlider, type ContinuousControl } from "./FrequencySlider";
 import { Activity, Square } from "lucide-react";
 import { useMemo, useState } from "react";
 import { TraceVisibilityFilter } from "./TraceVisibilityFilter";
@@ -52,7 +52,7 @@ export function DriverExcursionPlot({
   data,
   coupledSelected,
   currentFrequencyHz,
-  frequencyValues,
+  continuous, frequencyValues,
   frequencyPosition,
   frequencyCount,
   onFrequencyPositionChange,
@@ -65,6 +65,7 @@ export function DriverExcursionPlot({
   data: DriverExcursionData | null;
   coupledSelected: boolean;
   currentFrequencyHz: number;
+  continuous?: ContinuousControl;
   frequencyValues: readonly number[];
   frequencyPosition: number;
   frequencyCount: number;
@@ -77,7 +78,9 @@ export function DriverExcursionPlot({
 }) {
   const { ref: chartRef, width, height } = usePlotDimensions();
   const padding = { left: 54, right: 24, top: 13, bottom: 34 };
-  const [frequencyMaximum, setFrequencyMaximum] = useState<2000 | 20000>(2000);
+  const [axisMaximum, setFrequencyMaximum] = useState<2000 | 20000>(2000);
+  const frequencyMinimum = continuous?.range[0] ?? AUDIO_FREQUENCY_MINIMUM_HZ;
+  const frequencyMaximum = continuous?.range[1] ?? axisMaximum;
   const [hiddenTraceIds, setHiddenTraceIds] = useState<Set<string>>(() => new Set());
   const traces = data ? Array.from(data.traces.entries()) : [];
   const maximumExcursion = useMemo(() => {
@@ -87,14 +90,14 @@ export function DriverExcursionPlot({
     }
     return niceMaximum(maximum * 1.08);
   }, [data]);
-  const logMinimum = Math.log10(AUDIO_FREQUENCY_MINIMUM_HZ);
+  const logMinimum = Math.log10(frequencyMinimum);
   const logRange = Math.log10(frequencyMaximum) - logMinimum;
   const plotRight = Math.max(padding.left + 1, width - padding.right);
   const plotBottom = Math.max(padding.top + 1, height - padding.bottom);
   const x = (frequency: number) => padding.left + ((Math.log10(frequency) - logMinimum) / logRange) * (plotRight - padding.left);
   const y = (value: number) => padding.top + (1 - value / maximumExcursion) * (plotBottom - padding.top);
   const axes = { width, height, left: padding.left, right: plotRight, top: padding.top, bottom: plotBottom,
-    minimum: 0, maximum: maximumExcursion, frequencyMaximum, identity: "excursion" };
+    minimum: 0, maximum: maximumExcursion, frequencyMinimum, frequencyMaximum, identity: "excursion" };
   const crosshair = usePlotCrosshair(axes);
   const paths = (frequencies: Float64Array, values: Float32Array) => {
     const result: string[] = [];
@@ -110,9 +113,9 @@ export function DriverExcursionPlot({
     return result;
   };
   const yTicks = Array.from({ length: 6 }, (_, index) => maximumExcursion * index / 5);
-  const xMajorTicks = AUDIO_FREQUENCY_MAJOR_TICKS_HZ.filter((frequency) => frequency <= frequencyMaximum);
-  const xMinorTicks = logarithmicMinorTicks(frequencyMaximum);
-  const cursorX = x(Math.max(AUDIO_FREQUENCY_MINIMUM_HZ, Math.min(frequencyMaximum, currentFrequencyHz)));
+  const xMajorTicks = AUDIO_FREQUENCY_MAJOR_TICKS_HZ.filter((frequency) => frequency >= frequencyMinimum && frequency <= frequencyMaximum);
+  const xMinorTicks = logarithmicMinorTicks(frequencyMaximum).filter(f => f >= frequencyMinimum);
+  const cursorX = x(Math.max(frequencyMinimum, Math.min(frequencyMaximum, currentFrequencyHz)));
   const toggleTrace = (id: string) => setHiddenTraceIds((current) => {
     const next = new Set(current);
     if (next.has(id)) next.delete(id);
@@ -124,7 +127,7 @@ export function DriverExcursionPlot({
     <div className="response-toolbar">
       <div className="response-title"><Activity size={14} /><strong>Driver excursion</strong></div>
       <span>Peak displacement magnitude</span>
-      <FrequencySlider frequencyValues={frequencyValues} currentFrequencyHz={currentFrequencyHz} frequencyPosition={frequencyPosition}
+      <FrequencySlider continuous={continuous} frequencyValues={frequencyValues} currentFrequencyHz={currentFrequencyHz} frequencyPosition={frequencyPosition}
           frequencyCount={frequencyCount} onFrequencyPositionChange={onFrequencyPositionChange} />
       <button className={`bem-pressure-button ${calculating ? "stop" : ""}`} disabled={!calculating && !canCalculate} onClick={onCalculateOrStop}>
         {calculating ? <Square size={11} fill="currentColor" /> : <Activity size={12} />} {calculating ? `Stop ${completedCount}/${totalCount}` : "Calculate Coupled Sweep"}
@@ -144,12 +147,12 @@ export function DriverExcursionPlot({
               <text x={(padding.left + plotRight) / 2} y={height - 5} textAnchor="middle" className="axis-title">Frequency (Hz)</text>
               <text x={13} y={(padding.top + plotBottom) / 2} transform={`rotate(-90 13 ${(padding.top + plotBottom) / 2})`} textAnchor="middle" className="axis-title">Peak excursion (mm)</text>
               <g clipPath="url(#driver-excursion-clip)">
-                <line x1={cursorX} x2={cursorX} y1={padding.top} y2={plotBottom} className="frequency-cursor" />
+                {(!continuous || currentFrequencyHz >= frequencyMinimum && currentFrequencyHz <= frequencyMaximum) && <line x1={cursorX} x2={cursorX} y1={padding.top} y2={plotBottom} className="frequency-cursor" />}
                 {traces.flatMap(([id, trace], index) => hiddenTraceIds.has(id) ? [] : paths(trace.frequenciesHz ?? data!.frequenciesHz, trace.excursionMm).map((path, pathIndex) => <path key={`${id}-${pathIndex}`} d={path} stroke={driverTraceColor(index)} className="bem-trace" />))}
               </g>
               <PlotCrosshair point={crosshair.point} axes={axes} />
             </svg>
-            <button className="response-range-toggle" type="button" onClick={() => setFrequencyMaximum((current) => current === 2000 ? 20000 : 2000)}>20 Hz–{frequencyMaximum === 2000 ? "2 kHz" : "20 kHz"}</button>
+            {!continuous && <button className="response-range-toggle" type="button" onClick={() => setFrequencyMaximum((current) => current === 2000 ? 20000 : 2000)}>20 Hz–{frequencyMaximum === 2000 ? "2 kHz" : "20 kHz"}</button>}
             </div>
             <TraceVisibilityFilter items={traces.map(([id, trace], index) => ({ id, name: trace.name, color: driverTraceColor(index) }))} hiddenIds={hiddenTraceIds} onToggle={toggleTrace} />
           </div>}

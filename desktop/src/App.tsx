@@ -1,3 +1,4 @@
+import { effectiveRange, frequencyDomain, hasCoupledROM, selectFrequency, sweepGrid, defaultDensity, sweepDensities, type Band } from "./model/frequencyDomain";
 import { useProjectRecovery } from "./io/useProjectRecovery";
 import { assetIdentity } from "./model/assetIdentity";
 import { estimateSolverComplexity } from "./model/solverComplexity";
@@ -64,7 +65,7 @@ import {
   computeMixedMicrophonePatternResponses,
   fieldFrameFromSpl,
   minimumSourceHeightM,
-  nearestFrequencyIndex,
+  scenePatternFrequencies,
 } from "./model/field";
 import type { Fidelity, FieldFrame, LoadedSpeakerPackage, MicrophoneConfiguration, ObservationPlane, RigidMeshAsset, RigidMeshConfiguration, SourceConfiguration } from "./model/types";
 import { heatmapLegendGradient } from "./model/heatmap";
@@ -77,18 +78,21 @@ export function App() {
   return start ? <ProjectWorkspace start={start} onProjects={() => setStart(null)} /> : <ProjectsScreen onStart={setStart} />;
 }
 
-const EMPTY_FREQUENCIES = new Float64Array([80]);
+
 function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjects: () => void }) {
   const { editor, present,
     setPackages, setActivePackageId, setSourceConfigs, setChannels, setActiveChannelId,
     setRigidMeshes, setActiveRigidMeshId, setRigidObjects, setMicrophones, setAudiencePlanes, setActivePlaneId,
-    setFrequencyIndex, setFidelity, setSelectedInstances, setProjectName } = useSceneEditor();
+    setPlaneHz, setFidelity, setSelectedInstances, setProjectName } = useSceneEditor();
   const { packages, activePackageId, sourceConfigs, channels, activeChannelId, rigidMeshes,
-    activeRigidMeshId, rigidObjects, microphones, audiencePlanes, heatmapScale, systemGainDb, activePlaneId, frequencyIndex, fidelity,
+    activeRigidMeshId, rigidObjects, microphones, audiencePlanes, heatmapScale, systemGainDb, activePlaneId, planeHz, sweepRange, fidelity,
     selectedInstances, projectName, organization } = present;
   const [frameRequest, setFrameRequest] = useState<{ ids: string[]; serial: number } | null>(null);
   const pkg = packages.find((candidate) => candidate.id === activePackageId) ?? packages[0];
-  const frequenciesHz = pkg?.frequenciesHz ?? EMPTY_FREQUENCIES;
+  const [density, setDensity] = useState(() => {
+    const saved = Number(localStorage.getItem("sweepPointsPerOctave"));
+    return sweepDensities.includes(saved) ? saved : defaultDensity;
+  });
   const activePlane = audiencePlanes.find(p => p.id === activePlaneId) ?? audiencePlanes[0];
   const observation = activePlane ?? defaultObservation;
   const setObservation = (value: ObservationPlane | ((current: ObservationPlane) => ObservationPlane)) => {
@@ -333,19 +337,16 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     () => (JSON.parse(activeSourcePackageIdsKey) as string[]).map((id) => packageById.get(id)).filter(Boolean) as LoadedSpeakerPackage[],
     [activeSourcePackageIdsKey, packageById],
   );
-  const sortedFrequencyIndices = useMemo(
-    () => Array.from(frequenciesHz.keys())
-      .filter(index => supportsScenePatternFrequency(acousticPackages, frequenciesHz[index]))
-      .sort((a, b) => frequenciesHz[a] - frequenciesHz[b]),
-    [acousticPackages, frequenciesHz],
-  );
-  const usableFrequencyIndices = sortedFrequencyIndices.length > 0
-    ? sortedFrequencyIndices
-    : Array.from(frequenciesHz.keys()).sort((a, b) => frequenciesHz[a] - frequenciesHz[b]);
-  const sortedPosition = Math.max(0, usableFrequencyIndices.indexOf(frequencyIndex));
-  useEffect(() => {
-    if (!usableFrequencyIndices.includes(frequencyIndex)) editor.set("frequencyIndex", usableFrequencyIndices[0], false);
-  }, [frequencyIndex, usableFrequencyIndices]);
+  const domain = useMemo(() => frequencyDomain(acousticPackages, fidelity), [acousticPackages, fidelity]);
+  const range = useMemo(() => domain.band && effectiveRange(domain.band, sweepRange), [domain, sweepRange]);
+  const sweep = useMemo(() => range ? sweepGrid(range, density) : domain.grid, [domain, range, density]);
+  const sweepHz = useMemo(() => Float64Array.from(sweep), [sweep]);
+  const selectedFrequencyHz = selectFrequency(domain, planeHz);
+  const continuous = domain.band && range ? {
+    band: domain.band, range, onPlane: setPlaneHz,
+    onRange: (value: Band) => editor.set("sweepRange", value, true, "Change sweep range"),
+  } : undefined;
+  const patternAvailable = acousticPackages.length > 0 && supportsScenePatternFrequency(acousticPackages, selectedFrequencyHz);
   const packageForSource = useCallback(
     (source: SourceConfiguration) => packageById.get(source.packageId) ?? pkg,
     [packageById, pkg],
@@ -356,10 +357,9 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     () => cabinetClearanceViolations(boundaryAssetById, [...sources, ...rigidInstances]).length === 0,
     [boundaryAssetById, rigidInstances, sources],
   );
-  const selectedFrequencyHz = frequenciesHz[frequencyIndex];
   const patternLookups = useMemo(
-    () => buildPackagePatternLookups(sortedFrequencyIndices.includes(frequencyIndex) ? acousticPackages : [], selectedFrequencyHz),
-    [acousticPackages, selectedFrequencyHz, sortedFrequencyIndices, frequencyIndex],
+    () => buildPackagePatternLookups(patternAvailable ? acousticPackages : [], selectedFrequencyHz),
+    [acousticPackages, selectedFrequencyHz, patternAvailable],
   );
   const selectedInstance = selectedInstances.at(-1) ?? null;
   const selectedSourceIndex = sourceConfigs.findIndex((source) => source.id === selectedInstance);
@@ -387,11 +387,17 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     ? computeMixedFieldFrame(packageById, patternLookups, sources, drivenSourceConfigs, p, selectedFrequencyHz)
     : emptyFieldFrame(p)])), [drivenSourceConfigs, packageById, patternLookups, sources, observationAcousticKey, selectedFrequencyHz]);
   const patternField = activePlane ? patternFields[activePlane.id] : emptyFieldFrame(defaultObservation);
+  const patternSweep = useMemo(() => {
+    if (fidelity === "coupled" && acousticPackages.some(p => p.manifest.files.patterns?.evaluator !== "delay_compensated_linear_v1")) {
+      return scenePatternFrequencies(acousticPackages).filter(f => range ? f >= range[0] && f <= range[1] : sweep.includes(f));
+    }
+    return sweep.filter(f => supportsScenePatternFrequency(acousticPackages, f));
+  }, [acousticPackages, fidelity, range, sweep]);
   const microphonePatternResponses = useMemo(
     () => sourceConfigs.length > 0
-      ? computeMixedMicrophonePatternResponses(packageById, sources, drivenSourceConfigs, microphones)
+      ? computeMixedMicrophonePatternResponses(packageById, sources, drivenSourceConfigs, microphones, patternSweep)
       : { frequenciesHz: new Float64Array(), traces: [] },
-    [drivenSourceConfigs, packageById, sources, microphones],
+    [drivenSourceConfigs, packageById, sources, microphones, patternSweep],
   );
   const microphoneSweepKey = useMemo(() => JSON.stringify({
     backend: solverBackend,
@@ -400,19 +406,19 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     sources: drivenSourceConfigs,
     rigidObjects,
     microphones,
-    frequencies: Array.from(microphonePatternResponses.frequenciesHz),
-  }), [solverBackend, drivenSourceConfigs, fidelity, microphonePatternResponses.frequenciesHz, microphones, packages, rigidObjects]);
+    frequencies: Array.from(sweepHz),
+  }), [solverBackend, drivenSourceConfigs, fidelity, sweepHz, microphones, packages, rigidObjects]);
   // A solved boundary depends on the processed drives as well as geometry.
   // Observation planes are deliberately excluded so all planes share a solve.
   const currentBoundarySolutionKey = useMemo(() => JSON.stringify({
     backend: solverBackend,
     fidelity,
     packages: packages.map(({ id, sourcePath }) => ({ id, sourcePath })),
-    frequency: frequenciesHz[frequencyIndex],
+    frequency: selectedFrequencyHz,
     sources: drivenSourceConfigs,
     rigidObjects,
     rigidPaths: rigidMeshes.map(({ id, sourcePath }) => ({ id, sourcePath })),
-  }), [solverBackend, fidelity, packages, frequenciesHz, frequencyIndex, rigidObjects, rigidMeshes, drivenSourceConfigs]);
+  }), [solverBackend, fidelity, packages, selectedFrequencyHz, rigidObjects, rigidMeshes, drivenSourceConfigs]);
   const currentSolveKey = useMemo(() => JSON.stringify({
     boundary: currentBoundarySolutionKey,
     observation: observationAcousticKey,
@@ -423,29 +429,28 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     : patternField;
   const boundaryCurrent = selectedSolvedField?.key === currentSolveKey;
   const level2Package = activeSourcePackageIds.length > 0 ? packageById.get(activeSourcePackageIds[0]) ?? null : null;
-  const level2FrequencyAvailable = Boolean(level2Package && Array.from(level2Package.frequenciesHz).some(
-    (frequency) => Math.abs(frequency - selectedFrequencyHz) <= Math.max(1e-4, selectedFrequencyHz * 1e-6),
-  ));
+  const boundaryDomain = useMemo(() => frequencyDomain(acousticPackages, "boundary"), [acousticPackages]);
+  const level2FrequencyAvailable = boundaryDomain.grid.length > 0;
   const rigidMeshesAvailable = rigidObjects.every((object) => Boolean(rigidMeshById.get(object.assetId)?.sourcePath));
   const boundaryAvailable = Boolean(
     window.boundaryLabDesktop && activeSourcePackageIds.length > 0 && activeSourcePackageIds.every((id) => {
       const item = packageById.get(id);
-      return item?.sourcePath && item.manifest.fidelity_level >= 2 && Array.from(item.frequenciesHz).some((frequency) => Math.abs(frequency - selectedFrequencyHz) <= Math.max(1e-4, selectedFrequencyHz * 1e-6));
+      return item?.sourcePath && item.manifest.fidelity_level >= 2 && level2FrequencyAvailable;
     }) && rigidMeshesAvailable,
   );
   const solvePackagePaths = useMemo(() => Object.fromEntries(
     [...new Set(sourceConfigs.map((source) => source.packageId))].map((id) => [id, packages.find((item) => item.id === id)?.sourcePath ?? ""]),
   ), [sourceConfigs, packages]);
   const scenePackages = activeSourcePackageIds.map((id) => packageById.get(id));
+  const coupledDomain = useMemo(() => frequencyDomain(acousticPackages, "coupled"), [acousticPackages]);
   const coupledUnavailableReason = !window.boundaryLabDesktop
     ? "Coupled solving requires the desktop app."
     : scenePackages.length === 0 ? "Add a speaker object to enable Coupled solving."
     : scenePackages.some((item) => !item?.sourcePath) ? "Every speaker package must be loaded from disk."
-    : scenePackages.some((item) => (item?.manifest.fidelity_level ?? 0) < 3 || item?.manifest.files.coupled_model?.representation !== "parity_petrov_galerkin_rom")
-      ? "Every speaker package must contain a Level 3 parity Petrov-Galerkin ROM."
+    : scenePackages.some((item) => (item?.manifest.fidelity_level ?? 0) < 3 || !item || !hasCoupledROM(item))
+      ? "Every speaker package must contain a Level 3 speaker ROM."
     : !rigidMeshesAvailable ? "Every rigid mesh must be loaded from disk."
-    : scenePackages.some((item) => !item || !Array.from(item.frequenciesHz).some((frequency) => Math.abs(frequency - selectedFrequencyHz) <= Math.max(1e-4, selectedFrequencyHz * 1e-6)))
-      ? "Select a frequency exported by every speaker package."
+    : !coupledDomain.band && !coupledDomain.grid.length ? "The speaker ROMs have no common frequencies."
     : undefined;
   const coupledAvailable = coupledUnavailableReason === undefined;
   const scenePackageLevel = sourceConfigs.length > 0 ? Math.min(...sourceConfigs.map(
@@ -458,8 +463,8 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
       : !rigidMeshesAvailable
         ? "Level 2 requires every rigid mesh to be loaded from disk in the desktop app."
       : !level2FrequencyAvailable
-        ? "The selected frequency was not exported by the active Level 2 package."
-        : !boundaryAvailable ? "Every speaker package must contain Level 2 data at the selected frequency." : undefined;
+        ? "The placed packages have no common Level 2 frequencies."
+        : !boundaryAvailable ? "Every speaker package must contain Level 2 data." : undefined;
   const selectedSolverAvailable = solverBackend !== null && !preferencesSaving && (fidelity === "boundary"
     ? boundaryAvailable
     : fidelity === "coupled"
@@ -513,13 +518,13 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     rigidObjects,
     microphones,
     audiencePlanes,
-    frequenciesHz[frequencyIndex],
+    selectedFrequencyHz,
     fidelity,
     heatmapScale,
     systemGainDb,
     organization,
-    captures, [...visibleCaptureIds],
-  )), [projectName, packages, rigidMeshes, channels, sourceConfigs, rigidObjects, microphones, audiencePlanes, frequenciesHz, frequencyIndex, fidelity, heatmapScale, systemGainDb, organization, captures, visibleCaptureIds]);
+    captures, [...visibleCaptureIds], sweepRange,
+  )), [projectName, packages, rigidMeshes, channels, sourceConfigs, rigidObjects, microphones, audiencePlanes, selectedFrequencyHz, fidelity, heatmapScale, systemGainDb, organization, captures, visibleCaptureIds, sweepRange]);
   const projectEdited = savedProjectSnapshot === null || savedProjectSnapshot !== currentProjectContents;
   const recoveryStatus = useProjectRecovery(recoveryId, currentProjectContents, projectEdited, recoveryReady);
   const captureCurrentAnalysis = () => {
@@ -570,7 +575,8 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     rigidObjectsRef.current = [];
     setMicrophones([]);
     setSelectedInstances(["subwoofer-1"]);
-    setFrequencyIndex(nearestFrequencyIndex(next, 80));
+    setPlaneHz(80);
+    editor.set("sweepRange", undefined);
     setFidelity("pattern");
     setSolvedFields(emptySolvedFieldCache());
     setBoundarySolutionKey(null);
@@ -602,7 +608,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     });
     if (!editor.present.sourceConfigs.length && editor.present.packages.length <= 1) {
       setActivePackageId(next.id);
-      setFrequencyIndex(nearestFrequencyIndex(next, frequenciesHz[frequencyIndex]));
+
     }
     setError(null);
   };
@@ -646,7 +652,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
       nextBoundaryAssets,
       [...nextSources.map(buildSourceInstance), ...nextRigidObjects.map(buildRigidInstance)],
     );
-    const nextFrequencyIndex = nextPackage ? nearestFrequencyIndex(nextPackage, project.selected_frequency_hz) : 0;
+
     const requestedSolverFidelity = project.requested_fidelity === "boundary" ||
       project.requested_fidelity === "coupled";
     const nextFidelity: Fidelity = requestedSolverFidelity &&
@@ -655,7 +661,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
         nextSources.every((source) => {
           const sourcePackage = nextPackageById.get(source.packageId);
           return sourcePackage?.sourcePath && sourcePackage.manifest.fidelity_level >= (project.requested_fidelity === "coupled" ? 3 : 2) &&
-            (project.requested_fidelity !== "coupled" || sourcePackage.manifest.files.coupled_model?.representation === "parity_petrov_galerkin_rom");
+            (project.requested_fidelity !== "coupled" || hasCoupledROM(sourcePackage));
         }),
       )
       ? project.requested_fidelity
@@ -669,12 +675,12 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
       nextRigidObjects,
       project.microphones,
       project.audience_planes,
-      nextPackage?.frequenciesHz[nextFrequencyIndex] ?? 80,
+      selectFrequency(frequencyDomain(nextSources.map(s => nextPackageById.get(s.packageId)!), nextFidelity), project.selected_frequency_hz),
       nextFidelity,
       project.heatmap_scale,
       project.system_gain_db,
       project.scene_organization,
-      project.analysis_captures, project.visible_capture_ids,
+      project.analysis_captures, project.visible_capture_ids, project.sweep_range_hz,
     ));
     editor.set("organization", project.scene_organization);
     setPackages(nextPackages);
@@ -694,7 +700,8 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     setAudiencePlanes(project.audience_planes);
     setActivePlaneId(project.audience_planes[0]?.id ?? null);
     observationRef.current = project.audience_planes[0] ?? defaultObservation;
-    setFrequencyIndex(nextFrequencyIndex);
+    setPlaneHz(project.selected_frequency_hz);
+    editor.set("sweepRange", project.sweep_range_hz);
     setFidelity(nextFidelity);
     setSelectedInstances(nextSources[0] ? [nextSources[0].id] : []);
     setSolvedFields(emptySolvedFieldCache());
@@ -974,7 +981,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     setSolveMessage(`Starting BEAT ${solverBackend?.toUpperCase()} worker`);
     setError(null);
     if (!audiencePlanes.length) { setLiveSolveEnabled(false); setSolveState("idle"); return; }
-    if (!Object.values(patternFields).some(frame => frame.validMask.some(value => value !== 0))) {
+    if (patternAvailable && !Object.values(patternFields).some(frame => frame.validMask.some(value => value !== 0))) {
       setSolvedFields((current) => ({
         ...current,
         [coupled ? "coupled" : "boundary"]: { key: requestedKey, field: patternField, fields: patternFields },
@@ -994,12 +1001,12 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
       const nextFields: Record<string, FieldFrame> = {};
       for (const plane of audiencePlanes) {
         if (generation !== solveGeneration.current) return;
-        if (!patternFields[plane.id].validMask.some(value => value !== 0)) { nextFields[plane.id] = patternFields[plane.id]; continue; }
+        if (patternAvailable && !patternFields[plane.id].validMask.some(value => value !== 0)) { nextFields[plane.id] = patternFields[plane.id]; continue; }
         const reuseBoundary = boundaryReady;
         const request: DesktopLevel2SolveRequest = {
           packagePath: level2Package.sourcePath,
           packagePaths: solvePackagePaths,
-          frequencyHz: frequenciesHz[frequencyIndex],
+          frequencyHz: selectedFrequencyHz,
           backend: solverBackend ?? "cpu",
           fidelity: coupled ? "coupled" : "boundary",
           sources: drivenSourceConfigs,
@@ -1060,7 +1067,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
       setSolveMessage(`${fidelityLabel} solve failed`);
       setError(caught instanceof Error ? caught.message : String(caught));
     }
-  }, [confirmSolverMemory, preferencesSaving, solverBackend, solvePackagePaths, boundarySolutionKey, currentBoundarySolutionKey, currentSolveKey, drivenSourceConfigs, fidelity, frequencyIndex, level2Package, audiencePlanes, patternFields, patternField, frequenciesHz, rigidMeshById, rigidObjects]);
+  }, [confirmSolverMemory, preferencesSaving, solverBackend, solvePackagePaths, boundarySolutionKey, currentBoundarySolutionKey, currentSolveKey, drivenSourceConfigs, fidelity, selectedFrequencyHz, level2Package, audiencePlanes, patternFields, patternField, patternAvailable, rigidMeshById, rigidObjects]);
 
   const stopMicrophoneSweep = useCallback(async () => {
     if (!window.boundaryLabDesktop || microphoneSweepState !== "solving") return;
@@ -1079,7 +1086,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     const requestedKey = microphoneSweepKey;
     if (fidelity === "coupled") setAcousticResponse({
       key: requestedKey,
-      frequenciesHz: microphonePatternResponses.frequenciesHz.slice(),
+      frequenciesHz: sweepHz.slice(),
       traces: new Map(),
     });
     setRawSweeps((previous) => ({ ...previous, [fidelity === "coupled" ? "coupled" : "boundary"]: undefined }));
@@ -1087,23 +1094,23 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     stoppingMicrophoneSweep.current = false;
     setLiveSolveEnabled(false);
     setMicrophoneSweepState("solving");
-    setMicrophoneSweepProgress({ completed: 0, total: microphonePatternResponses.frequenciesHz.length });
+    setMicrophoneSweepProgress({ completed: 0, total: sweepHz.length });
     setBemMicrophoneResponses({
       key: requestedKey,
-      frequenciesHz: microphonePatternResponses.frequenciesHz.slice(),
+      frequenciesHz: sweepHz.slice(),
       traces: new Map(microphones.map((microphone) => [
         microphone.id,
-        new Float32Array(microphonePatternResponses.frequenciesHz.length).fill(Number.NaN),
+        new Float32Array(sweepHz.length).fill(Number.NaN),
       ])),
     });
     setDriverExcursion({
       key: requestedKey,
-      frequenciesHz: microphonePatternResponses.frequenciesHz.slice(),
+      frequenciesHz: sweepHz.slice(),
       traces: new Map(),
     });
     setElectricalResponse({
       key: requestedKey,
-      frequenciesHz: microphonePatternResponses.frequenciesHz.slice(),
+      frequenciesHz: sweepHz.slice(),
       traces: new Map(),
     });
     setError(null);
@@ -1116,6 +1123,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
         return;
       }
       const result = await window.boundaryLabDesktop.calculateMicrophoneSweep({
+        frequenciesHz: Array.from(sweepHz),
         packagePath: level2Package.sourcePath,
         packagePaths: solvePackagePaths,
         backend: solverBackend ?? "cpu",
@@ -1195,7 +1203,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     } finally {
       if (generation === sweepGeneration.current) stoppingMicrophoneSweep.current = false;
     }
-  }, [confirmSolverMemory, solverBackend, solvePackagePaths, drivenSourceConfigs, fidelity, level2Package, microphonePatternResponses.frequenciesHz, microphoneSweepKey, microphones, rigidMeshById, rigidObjects]);
+  }, [confirmSolverMemory, solverBackend, solvePackagePaths, drivenSourceConfigs, fidelity, level2Package, sweepHz, microphoneSweepKey, microphones, rigidMeshById, rigidObjects]);
 
   const calculateOrStopMicrophoneSweep = () => {
     if (microphoneSweepState === "solving") void stopMicrophoneSweep();
@@ -1794,11 +1802,8 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     const assets = new Map<string, BoundaryMeshAsset>([...nextPackages, ...nextMeshes].map(p => [p.id, p]));
     const instances = [...scene.sourceConfigs.map(buildSourceInstance), ...scene.rigidObjects.map(buildRigidInstance)];
     if (cabinetClearanceViolations(assets, instances).length) throw new Error("The updated asset would overlap other objects or the ground. Reposition the objects before applying this update.");
-    const currentHz = frequenciesHz[frequencyIndex];
     editor.run("Update project asset", () => {
       setPackages(nextPackages); setRigidMeshes(nextMeshes);
-      const reference = nextPackages.find(p => p.id === scene.activePackageId) ?? nextPackages[0];
-      if (reference) setFrequencyIndex(nearestFrequencyIndex(reference, currentHz));
     });
     // Cached solve keys include package paths; invalidate current results immediately.
     solveGeneration.current++; sweepGeneration.current++; microphoneSweepKeyRef.current = null;
@@ -2108,7 +2113,10 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
           >{liveSolveEnabled ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />} {liveSolveEnabled ? "Pause solve" : "Solve field"}</button>
         </div>
       </header>
-      {preferencesOpen && <SolverPreferencesDialog backend={solverBackend}
+      {preferencesOpen && <SolverPreferencesDialog density={density} onDensity={value => {
+        localStorage.setItem("sweepPointsPerOctave", String(value));
+        setDensity(value);
+      }} backend={solverBackend}
         interfaceScale={interfaceScale} scaleBusy={scaleSaving}
         onScaleChange={window.boundaryLabDesktop?.setInterfaceScale ? changeInterfaceScale : undefined}
         busy={preferencesSaving || solveState === "solving" || microphoneSweepState === "solving"}
@@ -2202,7 +2210,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
           <span className={solveState === "solving" ? "live-dot solving" : "live-dot"} />
           <div>
             <strong>{fidelity !== "pattern" ? (boundaryCurrent ? `${fidelity === "coupled" ? "Coupled" : "Boundary"} solution` : `${fidelity === "coupled" ? "Coupled" : "Boundary"} preview`) : "Pattern preview"}</strong>
-            <small>{solveState === "solving" ? solveMessage : `${liveSolveEnabled ? "Live" : boundaryCurrent ? `BEAT ${solverBackend?.toUpperCase()}` : "Current"} · ${formatFrequency(frequenciesHz[frequencyIndex])}${fidelity === "pattern" ? " · Rigid ground" : ""}`}</small>
+            <small>{solveState === "solving" ? solveMessage : `${liveSolveEnabled ? "Live" : boundaryCurrent ? `BEAT ${solverBackend?.toUpperCase()}` : "Current"} · ${formatFrequency(selectedFrequencyHz)}${fidelity === "pattern" ? " · Rigid ground" : ""}`}</small>
           </div>
         </div>
         {activePlane && <div className="viewport-color-legend">
@@ -2338,11 +2346,12 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
               bem={currentBoundaryResponses}
               coupled={currentCoupledResponses}
               overlays={capturedMicrophones}
-              currentFrequencyHz={frequenciesHz[frequencyIndex]}
-              frequencyPosition={sortedPosition}
-              frequencyCount={usableFrequencyIndices.length}
-              frequencyValues={usableFrequencyIndices.map(index => frequenciesHz[index])}
-              onFrequencyPositionChange={(position) => setFrequencyIndex(usableFrequencyIndices[position])}
+              currentFrequencyHz={selectedFrequencyHz}
+              continuous={continuous}
+              frequencyPosition={Math.max(0, domain.grid.indexOf(selectedFrequencyHz))}
+              frequencyCount={domain.grid.length}
+              frequencyValues={domain.grid}
+              onFrequencyPositionChange={position => setPlaneHz(domain.grid[position])}
               canCalculatePressure={selectedSolverAvailable && microphones.length > 0 && solveState !== "solving"}
               calculationLabel={fidelity === "coupled" ? "Calculate Coupled Pressure" : "Calculate BEM Pressure"}
               calculating={microphoneSweepState === "solving"}
@@ -2352,11 +2361,12 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
             /> : speakerQuantity === "excursion" ? <DriverExcursionPlot
               data={speakerExcursion}
               coupledSelected={fidelity === "coupled" || speakerExcursion.traces.size > 0}
-              currentFrequencyHz={frequenciesHz[frequencyIndex]}
-              frequencyPosition={sortedPosition}
-              frequencyCount={usableFrequencyIndices.length}
-              frequencyValues={usableFrequencyIndices.map(index => frequenciesHz[index])}
-              onFrequencyPositionChange={(position) => setFrequencyIndex(usableFrequencyIndices[position])}
+              currentFrequencyHz={selectedFrequencyHz}
+              continuous={continuous}
+              frequencyPosition={Math.max(0, domain.grid.indexOf(selectedFrequencyHz))}
+              frequencyCount={domain.grid.length}
+              frequencyValues={domain.grid}
+              onFrequencyPositionChange={position => setPlaneHz(domain.grid[position])}
               canCalculate={fidelity === "coupled" && coupledAvailable && solveState !== "solving"}
               calculating={microphoneSweepState === "solving"}
               completedCount={microphoneSweepProgress.completed}
@@ -2366,11 +2376,12 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
               data={(speakerQuantity === "acoustic" || speakerQuantity === "differential") ? speakerAcoustic : speakerElectrical}
               view={speakerQuantity}
               coupledSelected={fidelity === "coupled" || ((speakerQuantity === "acoustic" || speakerQuantity === "differential") ? speakerAcoustic : speakerElectrical).traces.size > 0}
-              currentFrequencyHz={frequenciesHz[frequencyIndex]}
-              frequencyPosition={sortedPosition}
-              frequencyCount={usableFrequencyIndices.length}
-              frequencyValues={usableFrequencyIndices.map(index => frequenciesHz[index])}
-              onFrequencyPositionChange={(position) => setFrequencyIndex(usableFrequencyIndices[position])}
+              currentFrequencyHz={selectedFrequencyHz}
+              continuous={continuous}
+              frequencyPosition={Math.max(0, domain.grid.indexOf(selectedFrequencyHz))}
+              frequencyCount={domain.grid.length}
+              frequencyValues={domain.grid}
+              onFrequencyPositionChange={position => setPlaneHz(domain.grid[position])}
               canCalculate={fidelity === "coupled" && coupledAvailable && solveState !== "solving"}
               calculating={microphoneSweepState === "solving"}
               completedCount={microphoneSweepProgress.completed}
