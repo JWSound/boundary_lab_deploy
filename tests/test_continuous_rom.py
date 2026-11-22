@@ -91,7 +91,7 @@ def scene(tmp_path):
 
 def test_off_grid_pressure_and_voltage_response(scene, tmp_path):
     payload, cache = scene
-    _, req = prepare_deploy_rom_request(payload, tmp_path, cache=cache)
+    _, req = prepare_deploy_rom_request({**payload, "_nativeContinuousROM": False}, tmp_path, cache=cache)
     assert req["frequency_hz"] == 162.5
     rom = req["rom"]
     assert rom["node_orbits"] == [[1]] and rom["face_orbits"] == [[1]]
@@ -121,6 +121,12 @@ def test_scene_domain_and_sweep_staging(scene, tmp_path):
     assert common_frequencies(packages, coupled=False) == [100, 1000]
     for grid in ([40, 162.5, 700], [100.5, 163, 210]):
         _, req = prepare_deploy_rom_microphone_sweep_request({**payload, "frequenciesHz": grid}, tmp_path, cache=cache)
+        assert req["rom_sweep"]["representation"] == "continuous_speaker_rom"
+        assert req["rom_sweep"]["compact_model"]["package"] == payload["packagePath"]
+        assert all("binary_arrays" not in e for e in req["rom_sweep"]["frequencies"])
+        assert req["provenance"]["rom_sweep_stage_binary_bytes_written"] == 0
+        assert not list(tmp_path.glob("*.bin"))
+        assert packages[""].coupled_model["interior"].matrices is None
         assert req["frequencies_hz"] == grid
         assert req["provenance"]["rom_sweep_stage_cache_hit"] == 0
     with pytest.raises(ValueError, match="frequency domain"):

@@ -245,6 +245,13 @@ def _solution_identity(payload: object) -> str:
     return hashlib.sha256(encoded.encode()).hexdigest()
 
 
+def _native_continuous_rom(worker, packages):
+    if not any((p.coupled_model or {}).get("representation") == "continuous_speaker_rom" for p in packages.values()):
+        return False
+    worker.ensure_started()
+    return 1 in (worker.worker_info or {}).get("deploy_continuous_rom_versions", [])
+
+
 def _solve(
     request_id: object,
     payload: object,
@@ -274,6 +281,7 @@ def _solve(
         if field_only:
             request_path, _request = prepare_deploy_field_request(payload, temp_dir)
         elif rom:
+            payload["_nativeContinuousROM"] = _native_continuous_rom(worker, scene_packages(payload, solve_cache))
             request_path, _request = prepare_deploy_rom_request(
                 payload,
                 temp_dir,
@@ -405,7 +413,7 @@ def _microphone_sweep(
         prepare_started = time.perf_counter()
         if rom_coupled:
             request_path, _request = prepare_deploy_rom_microphone_sweep_request(
-                {**sweep_payload, "frequenciesHz": frequencies},
+                {**sweep_payload, "frequenciesHz": frequencies, "_nativeContinuousROM": _native_continuous_rom(worker, packages)},
                 temp_dir,
                 cache=solve_cache,
                 status_callback=lambda message: _emit("status", request_id=request_id, message=message),

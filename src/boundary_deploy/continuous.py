@@ -1,6 +1,9 @@
 """Adapt a continuous-speaker-v1 interior to BEAT's single-sector boundary operator."""
 
 import base64
+import hashlib
+import json
+import zipfile
 
 import numpy as np
 
@@ -26,7 +29,8 @@ def _matrix(entry, expected_shape):
 
 
 class ContinuousInterior:
-    def __init__(self, data, declaration, manifest):
+    def __init__(self, data, declaration, manifest, reference):
+        self.reference = reference
         metadata = data["metadata"]
         if (
             metadata["format"] != "continuous-speaker-v1"
@@ -77,22 +81,40 @@ class ContinuousInterior:
             "force": (n, drivers),
             "drive": (drivers, ports),
         }
-        m = self.matrices = {key: _matrix(matrices[key], shape) for key, shape in shapes.items()}
-        self.walls = [
-            (w["thickness_m"], w["flow_resistivity_pa_s_per_m2"], _matrix(w["matrix"], (n, n))) for w in data["walls"]
-        ]
+        for key, shape in shapes.items():
+            if tuple(matrices[key]["shape"]) != shape:
+                raise ValueError(f"Invalid continuous ROM matrix shape for {key}.")
+        self.rank = n + 2 * drivers
+        self.port_count = ports
+        self.shapes = shapes
+        self.matrices = None
+
+    def load_legacy_matrices(self):
+        """Materialize host arrays only for workers using binary operator descriptors."""
+        if self.matrices is not None:
+            return
+        ref = self.reference
+        with zipfile.ZipFile(ref["package"]) as archive:
+            raw = archive.read(ref["member"])
+        if hashlib.sha256(raw).hexdigest() != ref["sha256"]:
+            raise ValueError("Continuous speaker model checksum mismatch.")
+        data = json.loads(raw)
+        m = {key: _matrix(data["matrices"][key], shape) for key, shape in self.shapes.items()}
+        self.walls = [(w["thickness_m"], w["flow_resistivity_pa_s_per_m2"], _matrix(w["matrix"], self.shapes["K"]))
+                      for w in data["walls"]]
         # Only the exterior nodes and faces with nonzero coupling need worker orbit entries.
         self.nodes = np.flatnonzero(m["trace"].any(axis=0) | m["bem_force"].any(axis=1))
         self.faces = np.flatnonzero(m["flux"].any(axis=1) | m["bem_velocity"].any(axis=1))
         if not len(self.nodes) or not len(self.faces):
             raise ValueError("Continuous ROM has no active boundary.")
-        self.rank = m["K"].shape[0] + 2 * len(self.drivers)
         self.trace = m["trace"][:, self.nodes]
+        self.matrices = m
 
     def operators(self, hz):
         """Map the exported equations onto the worker contract K x = B u - C p."""
         if not self.band[0] <= hz <= self.band[1]:
             raise ValueError(f"Frequency {hz:g} Hz outside continuous ROM band {self.band}.")
+        self.load_legacy_matrices()
         m = self.matrices
         s = 2j * np.pi * hz
         k = 2 * np.pi * hz / self.c

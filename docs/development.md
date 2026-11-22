@@ -30,6 +30,15 @@ the shared domain fail before BEAT solves. Omitting the sweep list uses common
 discrete samples, or the shared band endpoints and in-band fallback samples for
 a fully continuous scene.
 
+Deploy negotiates native continuous Level 3 support using the worker's
+`deploy_continuous_rom_versions` capability. Version 1 reads the verified model
+member directly from the package. Each worker shares one decoded model across
+its placements and retains up to 128 MiB of recently assembled CPU operators
+and factorizations. The active solve and compact models have separate memory
+requirements. Changing the frequency grid does not create a temporary binary
+sweep file for these packages. Workers without this capability receive staged
+operators. Discrete packages use their exported binary operators in both cases.
+
 Level 1 uses the pattern descriptor to select delay-compensated complex pressure
 interpolation. Sampled patterns constrain the scene to their recorded
 frequencies. Level 2 uses the shared frequencies of the fixed boundary traces.

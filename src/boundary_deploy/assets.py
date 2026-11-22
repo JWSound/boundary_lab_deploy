@@ -177,10 +177,12 @@ def _read_coupled_descriptor(
     declaration = manifest.get("files", {}).get("coupled_model", {})
     representation = declaration.get("representation")
     if representation == "continuous_speaker_rom":
-        interior = ContinuousInterior(json.loads(archive.read(declaration["path"])), declaration, manifest)
+        raw = archive.read(declaration["path"])
+        reference = {"package": str(Path(archive.filename).resolve()), "member": declaration["path"],
+                     "sha256": hashlib.sha256(raw).hexdigest()}
+        interior = ContinuousInterior(json.loads(raw), declaration, manifest, reference)
         return {**declaration, "interior": interior, "rank_per_sector": interior.rank,
-                "symmetry_mode": "off", "image_count": 1, "sector_signs": [[1, 1]],
-                "node_orbits": interior.nodes[:, None].tolist(), "face_orbits": interior.faces[:, None].tolist()}
+                "symmetry_mode": "off", "image_count": 1, "sector_signs": [[1, 1]]}
     if representation == "parity_petrov_galerkin_rom":
         model_path = str(declaration.get("path", ""))
         if not model_path:

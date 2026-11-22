@@ -1355,7 +1355,9 @@ def _prepare_scene_rom(
             status_callback=status_callback, boundary_request=local_geometry, _serialize=False,
         )
         model = local["rom_sweep" if sweep else "rom"]
-        geometry["provenance"]["packages"][package_id]["rom_representation"] = package.coupled_model["representation"]
+        geometry["provenance"]["packages"][package_id].update(
+            rom_representation=package.coupled_model["representation"], rom_transport=local["provenance"]["rom_transport"]
+        )
         models[package_id] = model
         transducers.extend({**t, "package_id": package_id} for t in local["transducers"])
         speakers.extend(local["speakers"])
@@ -1399,7 +1401,7 @@ def _prepare_scene_rom(
         geometry.update(schema=DEPLOY_MICROPHONE_SWEEP_SCHEMA, frequencies_hz=frequencies, rom_sweep=collection)
         geometry["provenance"].update(
             frequency_count=len(frequencies), rom_sweep_stage_binary_bytes=stage_bytes,
-            rom_sweep_stage_binary_bytes_written=stage_written, rom_sweep_stage_cache_hit=int(stage_written == 0),
+            rom_sweep_stage_binary_bytes_written=stage_written, rom_sweep_stage_cache_hit=int(stage_bytes > 0 and stage_written == 0),
         )
     else:
         geometry["rom"] = collection
@@ -1446,42 +1448,56 @@ def _prepare_single_rom_request(
         request_path = Path(work_dir) / "request.json"
         request = {**boundary_request, "provenance": dict(boundary_request["provenance"])}
     requested_frequency = float(request["frequency_hz"])
-    frequency_index = None if "interior" in model else int(
-        np.argmin(np.abs(model["arrays"]["frequencies_hz"] - requested_frequency))
-    )
-    selected = rom_operators(model, requested_frequency, frequency_index, ROM_ARRAY_NAMES)
     request["provenance"]["rom_representation"] = model["representation"]
-    rank = int(model.get("rank_per_sector", selected["k"].shape[-1]))
-    symmetry_mode = str(model.get("symmetry_mode", "xy")).lower()
-    expected_image_count = {"off": 1, "x": 2, "xy": 4}.get(symmetry_mode)
-    if expected_image_count is None:
-        raise ValueError(f"Parity ROM has unsupported symmetry mode {symmetry_mode!r}.")
-    image_count = int(model.get("image_count", expected_image_count))
-    sector_signs = model.get("sector_signs")
-    if not isinstance(sector_signs, list) or len(sector_signs) != expected_image_count:
-        raise ValueError("Parity ROM sector count does not match its symmetry mode.")
-    sector_count = len(sector_signs)
-    if image_count != expected_image_count:
-        raise ValueError("Parity ROM image count does not match its symmetry mode.")
-    if selected["k"].shape != (sector_count, rank, rank):
-        raise ValueError("Parity ROM K array has an invalid shape.")
-    node_orbits = model.get("node_orbits")
-    face_orbits = model.get("face_orbits")
-    if not isinstance(node_orbits, list) or not isinstance(face_orbits, list):
-        raise ValueError("Parity ROM is missing boundary orbit maps.")
-    if any(len(orbit) != image_count for orbit in (*node_orbits, *face_orbits)):
-        raise ValueError("Parity ROM boundary orbit width does not match its symmetry mode.")
-    if selected["c"].shape != (sector_count, rank, len(node_orbits)):
-        raise ValueError("Parity ROM C array does not align with its node orbits.")
-    if selected["d"].shape[:2] != (sector_count, len(face_orbits)):
-        raise ValueError("Parity ROM D array does not align with its face orbits.")
+    interior = model.get("interior")
+    native = interior is not None and payload.get("_nativeContinuousROM", True)
+    if native:
+        rank, input_count, transducer_count = interior.rank, interior.port_count, len(interior.drivers)
+        symmetry_mode, image_count, sector_signs = "off", 1, [[1, 1]]
+        transport = {"representation": "continuous_speaker_rom", "compact_model": interior.reference}
+    else:
+        frequency_index = None if "interior" in model else int(
+            np.argmin(np.abs(model["arrays"]["frequencies_hz"] - requested_frequency))
+        )
+        selected = rom_operators(model, requested_frequency, frequency_index, ROM_ARRAY_NAMES)
+        rank = int(model.get("rank_per_sector", selected["k"].shape[-1]))
+        symmetry_mode = str(model.get("symmetry_mode", "xy")).lower()
+        expected_image_count = {"off": 1, "x": 2, "xy": 4}.get(symmetry_mode)
+        if expected_image_count is None:
+            raise ValueError(f"Parity ROM has unsupported symmetry mode {symmetry_mode!r}.")
+        image_count = int(model.get("image_count", expected_image_count))
+        sector_signs = model.get("sector_signs")
+        if not isinstance(sector_signs, list) or len(sector_signs) != expected_image_count:
+            raise ValueError("Parity ROM sector count does not match its symmetry mode.")
+        sector_count = len(sector_signs)
+        if image_count != expected_image_count:
+            raise ValueError("Parity ROM image count does not match its symmetry mode.")
+        if selected["k"].shape != (sector_count, rank, rank):
+            raise ValueError("Parity ROM K array has an invalid shape.")
+        node_orbits = interior.nodes[:, None].tolist() if interior else model.get("node_orbits")
+        face_orbits = interior.faces[:, None].tolist() if interior else model.get("face_orbits")
+        if not isinstance(node_orbits, list) or not isinstance(face_orbits, list):
+            raise ValueError("Parity ROM is missing boundary orbit maps.")
+        if any(len(orbit) != image_count for orbit in (*node_orbits, *face_orbits)):
+            raise ValueError("Parity ROM boundary orbit width does not match its symmetry mode.")
+        if selected["c"].shape != (sector_count, rank, len(node_orbits)):
+            raise ValueError("Parity ROM C array does not align with its node orbits.")
+        if selected["d"].shape[:2] != (sector_count, len(face_orbits)):
+            raise ValueError("Parity ROM D array does not align with its face orbits.")
 
+        input_count = selected["b"].shape[-1]
+        transducer_count = int(selected["velocity"].shape[-2])
+        binary_path = Path(work_dir).resolve() / "speaker-rom.bin"
+        transport = {"representation": "parity_petrov_galerkin_rom",
+                     "node_orbits": node_orbits, "face_orbits": face_orbits,
+                     "binary_arrays": _write_deploy_binary_arrays(binary_path, selected)}
+
+    request["provenance"]["rom_transport"] = "native_continuous" if native else "binary_arrays"
     raw_sources = payload.get("sources")
     if not isinstance(raw_sources, list) or not raw_sources:
         raise ValueError("Deploy parity-ROM solve requires at least one source.")
     sources = [DeploySourcePlacement.from_payload(raw) for raw in raw_sources]
     source_components = request["boundary_components"][: len(sources)]
-    input_count = selected["b"].shape[-1]
     reference_voltage = float(payload.get("transducerReferenceVoltageV", 2.83))
     instances = []
     for source, component in zip(sources, source_components, strict=True):
@@ -1497,7 +1513,6 @@ def _prepare_single_rom_request(
             }
         )
 
-    transducer_count = int(selected["velocity"].shape[-2])
     physical_system = package.manifest.get("physical_system", {})
     package_transducers = (
         [
@@ -1534,8 +1549,6 @@ def _prepare_single_rom_request(
         for raw_source, source in zip(raw_sources, sources, strict=True)
     ]
 
-    binary_path = Path(work_dir).resolve() / "speaker-rom.bin"
-    binary_arrays = _write_deploy_binary_arrays(binary_path, selected)
     face_count = sum(int(component["face_count"]) for component in request["boundary_components"])
     node_count = sum(int(component["vertex_count"]) for component in request["boundary_components"])
     zeros_faces = np.zeros(face_count, dtype=np.float32).tolist()
@@ -1549,15 +1562,12 @@ def _prepare_single_rom_request(
         reference_boundary_pressure_mask=np.zeros(node_count, dtype=np.uint8).tolist(),
         rom={
             "format_version": 1,
-            "representation": "parity_petrov_galerkin_rom",
+            **transport,
             "symmetry_mode": symmetry_mode,
             "image_count": image_count,
             "rank_per_sector": rank,
             "sector_signs": sector_signs,
-            "node_orbits": node_orbits,
-            "face_orbits": face_orbits,
             "instances": instances,
-            "binary_arrays": binary_arrays,
             "gmres_tolerance": float(payload.get("romGmresTolerance", 1e-4)),
             "gmres_max_iterations": int(payload.get("romGmresMaxIterations", 30)),
         },
@@ -1614,21 +1624,28 @@ def _prepare_single_rom_sweep_request(
 
     sweep_entries: list[dict[str, Any]] = []
     reference_voltage = float(payload.get("transducerReferenceVoltageV", 2.83))
-    if isinstance(cache, DeploySolveCache):
-        staged, stage_cache_hit = cache.stage_rom_sweep_arrays(package, frequency_pairs, ROM_ARRAY_NAMES)
-    else:
-        staged = write_rom_sweep(package, frequency_pairs, ROM_ARRAY_NAMES, Path(work_dir).resolve() / "speaker-rom-sweep.bin")
+    native = "compact_model" in base_rom
+    if native:
+        frequency_descriptors = None
+        binary_bytes = binary_bytes_written = 0
         stage_cache_hit = False
-    frequency_descriptors = staged.frequency_descriptors
-    binary_bytes = staged.binary_bytes
-    binary_bytes_written = 0 if stage_cache_hit else binary_bytes
+    else:
+        if isinstance(cache, DeploySolveCache):
+            staged, stage_cache_hit = cache.stage_rom_sweep_arrays(package, frequency_pairs, ROM_ARRAY_NAMES)
+        else:
+            staged = write_rom_sweep(package, frequency_pairs, ROM_ARRAY_NAMES, Path(work_dir).resolve() / "speaker-rom-sweep.bin")
+            stage_cache_hit = False
+        frequency_descriptors = staged.frequency_descriptors
+        binary_bytes = staged.binary_bytes
+        binary_bytes_written = 0 if stage_cache_hit else binary_bytes
 
     if status_callback is not None:
         status_callback(
+            "Preparing native continuous ROM drives" if native else
             "Reusing staged Level 3 ROM sweep data" if stage_cache_hit else "Staging Level 3 ROM sweep data"
         )
     for sweep_index, (frequency_hz, _) in enumerate(frequency_pairs):
-        input_count = frequency_descriptors[sweep_index]["b"]["shape"][-1]
+        input_count = model["interior"].port_count if native else frequency_descriptors[sweep_index]["b"]["shape"][-1]
         instances: list[dict[str, Any]] = []
         for source, base_instance in zip(sources, base_instances, strict=True):
             gain = source_drive(source, frequency_hz)
@@ -1644,7 +1661,7 @@ def _prepare_single_rom_sweep_request(
             )
         sweep_entries.append(
             {
-                "binary_arrays": frequency_descriptors[sweep_index],
+                **({} if native else {"binary_arrays": frequency_descriptors[sweep_index]}),
                 "instances": instances,
             }
         )
