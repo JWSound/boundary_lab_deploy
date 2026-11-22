@@ -15,6 +15,7 @@ from typing import Any
 import meshio
 import numpy as np
 
+from boundary_deploy.continuous import ContinuousInterior
 from boundary_deploy.package_format import validate_speaker_package
 from boundary_deploy.phasor import LEGACY_PHASOR_CONVENTION, SOLVER_PHASOR_CONVENTION, convert_phasor
 
@@ -74,42 +75,17 @@ class DeploySolveCache:
     def stage_rom_sweep_arrays(
         self,
         package: DeployPackageData,
-        frequency_pairs: list[tuple[float, int]],
+        frequency_pairs: list[tuple[float, int | None]],
         array_names: tuple[str, ...],
     ) -> tuple[DeployRomSweepStage, bool]:
-        arrays = package.coupled_model.get("arrays") if isinstance(package.coupled_model, dict) else None
-        if not isinstance(arrays, dict):
-            raise ValueError("Deploy parity-ROM package did not load its reduced arrays.")
-        cache_key = (
-            package.fingerprint,
-            tuple(index for _frequency, index in frequency_pairs),
-            array_names,
-        )
+        cache_key = (package.fingerprint, tuple(frequency_pairs), array_names)
         cached = self.rom_sweep_stages.get(cache_key)
         if cached is not None and cached.binary_path.is_file():
             return cached, True
 
-        binary_values: dict[str, np.ndarray] = {}
-        descriptor_names: list[dict[str, str]] = []
-        for sweep_index, (_frequency_hz, array_index) in enumerate(frequency_pairs):
-            names: dict[str, str] = {}
-            for name in array_names:
-                binary_name = f"{name}_{sweep_index}"
-                binary_values[binary_name] = np.asarray(arrays[name][array_index], dtype=np.complex64)
-                names[name] = binary_name
-            descriptor_names.append(names)
-
-        key_text = json.dumps(cache_key, sort_keys=True, separators=(",", ":"), default=str)
-        binary_path = Path(self._rom_sweep_temp.name) / f"{hashlib.sha256(key_text.encode('utf-8')).hexdigest()}.bin"
-        all_descriptors = _write_deploy_binary_arrays(binary_path, binary_values)
-        stage = DeployRomSweepStage(
-            binary_path=binary_path,
-            frequency_descriptors=tuple(
-                {name: all_descriptors[binary_name] for name, binary_name in names.items()}
-                for names in descriptor_names
-            ),
-            binary_bytes=binary_path.stat().st_size,
-        )
+        key_text = json.dumps(cache_key, separators=(",", ":"))
+        binary_path = Path(self._rom_sweep_temp.name) / f"{hashlib.sha256(key_text.encode()).hexdigest()}.bin"
+        stage = write_rom_sweep(package, frequency_pairs, array_names, binary_path)
         self.rom_sweep_stages[cache_key] = stage
         return stage, False
 
@@ -166,6 +142,11 @@ def _load_deploy_package_data(
         points = np.asarray(fixed["points_m"], dtype=np.float64)
         pressure = np.asarray(fixed["pressure_pa"])
         normal = np.asarray(fixed["normal_derivative_pa_per_m"])
+    if coupled_model and "interior" in coupled_model:
+        interior = coupled_model["interior"]
+        if (not np.array_equal(interior.triangles, triangles) or interior.points.shape != points.shape
+                or not np.allclose(interior.points, points, rtol=0, atol=1e-8)):
+            raise ValueError("Continuous ROM boundary mesh differs from the package traces.")
     pressure = convert_phasor(pressure, source_convention)
     normal = convert_phasor(normal, source_convention)
     if coupled_model is not None and "arrays" in coupled_model:
@@ -195,6 +176,11 @@ def _read_coupled_descriptor(
 ) -> dict[str, Any] | None:
     declaration = manifest.get("files", {}).get("coupled_model", {})
     representation = declaration.get("representation")
+    if representation == "continuous_speaker_rom":
+        interior = ContinuousInterior(json.loads(archive.read(declaration["path"])), declaration, manifest)
+        return {**declaration, "interior": interior, "rank_per_sector": interior.rank,
+                "symmetry_mode": "off", "image_count": 1, "sector_signs": [[1, 1]],
+                "node_orbits": interior.nodes[:, None].tolist(), "face_orbits": interior.faces[:, None].tolist()}
     if representation == "parity_petrov_galerkin_rom":
         model_path = str(declaration.get("path", ""))
         if not model_path:
@@ -307,21 +293,32 @@ def _write_deploy_binary_arrays(
     path: Path,
     arrays: dict[str, np.ndarray],
 ) -> dict[str, dict[str, object]]:
-    descriptors: dict[str, dict[str, object]] = {}
-    offset = 0
     with path.open("wb") as stream:
-        for name, values in arrays.items():
-            array = np.ascontiguousarray(values, dtype=np.complex64)
-            payload = array.astype(array.dtype.newbyteorder("<"), copy=False).tobytes(order="C")
-            stream.write(payload)
-            descriptors[name] = {
-                "file": str(path.resolve()),
-                "offset": offset,
-                "nbytes": len(payload),
-                "dtype": "complex64",
-                "shape": list(array.shape),
-                "order": "C",
-                "byte_order": "little",
-            }
-            offset += len(payload)
+        return _append_arrays(stream, path, arrays)
+
+
+def _append_arrays(stream, path, arrays):
+    descriptors = {}
+    for name, values in arrays.items():
+        array = np.ascontiguousarray(values, dtype="<c8")
+        descriptors[name] = {
+            "file": str(path.resolve()), "offset": stream.tell(), "nbytes": array.nbytes,
+            "dtype": "complex64", "shape": list(array.shape), "order": "C", "byte_order": "little",
+        }
+        stream.write(memoryview(array).cast("B"))
     return descriptors
+
+
+def rom_operators(model, hz, index, names):
+    if "interior" in model:
+        return model["interior"].operators(hz)
+    return {name: np.asarray(model["arrays"][name][index], dtype=np.complex64) for name in names}
+
+
+def write_rom_sweep(package, pairs, names, path):
+    descriptors = []
+    with path.open("wb") as stream:
+        for hz, index in pairs:
+            arrays = rom_operators(package.coupled_model, hz, index, names)
+            descriptors.append(_append_arrays(stream, path, arrays))
+    return DeployRomSweepStage(path, tuple(descriptors), path.stat().st_size)

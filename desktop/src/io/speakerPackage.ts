@@ -90,6 +90,22 @@ export function loadSpeakerPackage(bytes: ArrayBuffer, fileName: string, sourceP
   }
   manifest.phasor_convention = "exp(+i omega t)";
   if (pressureArray.shape.length !== 3) throw new Error("Pattern pressure must have frequency, excitation, and direction axes.");
+  const descriptor = manifest.files.patterns;
+  const continuous = manifest.capabilities?.includes("continuous_complex_spherical_pattern");
+  if (continuous || descriptor.evaluator !== undefined) {
+    const band = descriptor.frequency_band_hz;
+    if (!continuous ||
+        descriptor.evaluator !== "delay_compensated_linear_v1" ||
+        !Array.isArray(band) || band.length !== 2 || frequencies.length < 2 ||
+        frequencies[0] !== band[0] || frequencies.at(-1) !== band[1] ||
+        frequencies.some((f, i) => !Number.isFinite(f) || f <= 0 || (i > 0 && f <= frequencies[i - 1])) ||
+        !Number.isFinite(manifest.medium.sound_speed_m_per_s) || manifest.medium.sound_speed_m_per_s <= 0 ||
+        pressureArray.shape[0] !== frequencies.length || pressureArray.shape[1] !== manifest.excitation_port_ids.length ||
+        pressureArray.shape[2] !== radii.length || directions.length !== 3 * radii.length ||
+        radii.some(r => !Number.isFinite(r) || r <= 0)) {
+      throw new Error("Invalid or unsupported continuous spherical pattern descriptor.");
+    }
+  }
 
   const geometryPath = manifest.files.fixed_sources?.geometry_mesh;
   const mesh = typeof geometryPath === "string" && files[geometryPath]

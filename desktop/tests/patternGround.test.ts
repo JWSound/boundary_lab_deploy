@@ -93,3 +93,33 @@ close(shifted.traces[0].splDb[0], original.splDb[0]);
 const pair = [source, { ...source, id: "cancel", equalizer: { filters: [allpass] } }];
 const cancellation = computeMicrophonePatternResponses(pkg, pair.map(buildSourceInstance), pair, mic);
 assert.ok(cancellation.traces[0].splDb[0] < original.splDb[0] - 100);
+
+// The sphere delay rotates by half a turn between these knots.
+const { buildInterpolatedPatternLookup } = await import("../src/model/field");
+const continuous = createDemoPackage();
+continuous.manifest.files.patterns.evaluator = "delay_compensated_linear_v1";
+continuous.manifest.medium.sound_speed_m_per_s = 300;
+continuous.frequenciesHz = Float64Array.of(75, 225);
+continuous.pressureShape = [2, 1, 1];
+continuous.radiiM = Float32Array.of(1);
+continuous.directionsPackage = Float32Array.of(0, 1, 0);
+continuous.pressure = { real: Float32Array.of(0, 0), imag: Float32Array.of(-1, 1) };
+const midpoint = buildInterpolatedPatternLookup(continuous, 150);
+close(midpoint.real[0], -1);
+close(midpoint.imag[0], 0);
+assert.throws(() => buildInterpolatedPatternLookup(continuous, 250), /outside/);
+const continuousConfig = { ...source, packageId: continuous.id };
+const map = new Map([[continuous.id, continuous]]);
+const response = computeMixedMicrophonePatternResponses(map, [buildSourceInstance(continuousConfig)],
+  [continuousConfig], mic, [150]);
+const field = computeMixedFieldFrame(map, new Map([[continuous.id, midpoint]]), [buildSourceInstance(continuousConfig)],
+  [continuousConfig], plane, 150);
+close(response.traces[0].splDb[0], field.splDb[0]);
+delete continuous.manifest.files.patterns.evaluator;
+assert.throws(() => buildInterpolatedPatternLookup(continuous, 150), /discrete/);
+continuous.manifest.files.patterns.evaluator = "delay_compensated_linear_v1";
+const { scenePatternFrequencies } = await import("../src/model/field");
+assert.deepEqual(scenePatternFrequencies([continuous, pkg]), [100]);
+assert.deepEqual(scenePatternFrequencies([pkg, continuous]), [100]);
+assert.throws(() => scenePatternFrequencies([continuous, pkg], [150]), /common scene/);
+assert.deepEqual(scenePatternFrequencies([continuous], [75, 152.5, 225]), [75, 152.5, 225]);

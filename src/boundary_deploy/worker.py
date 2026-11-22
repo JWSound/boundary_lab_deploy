@@ -22,7 +22,7 @@ from boundary_deploy.engine_runtime import (
     DEFAULT_BEAT_ENGINE_SOLVER_SCRIPT,
     BeatEngineWorkerProcess,
 )
-from boundary_deploy.packages import common_frequencies, scene_packages
+from boundary_deploy.packages import ROM_REPRESENTATIONS, common_frequencies, scene_packages
 from boundary_deploy.solve import (
     prepare_deploy_field_request,
     prepare_deploy_microphone_sweep_request,
@@ -133,8 +133,8 @@ def _execution_worker_key(payload: object, solve_cache: DeploySolveCache) -> str
     packages = scene_packages(payload, solve_cache)
     for package in packages.values():
         model = package.coupled_model
-        if not isinstance(model, dict) or model.get("representation") != "parity_petrov_galerkin_rom":
-            raise ValueError("Deploy Level 3 requires a parity Petrov?Galerkin ROM package.")
+        if not isinstance(model, dict) or model.get("representation") not in ROM_REPRESENTATIONS:
+            raise ValueError("Deploy Level 3 requires a continuous or parity Petrov-Galerkin ROM package.")
     return worker_key
 
 
@@ -349,9 +349,7 @@ def _microphone_sweep(
     packages = scene_packages(payload, solve_cache)
     package_data = next(iter(packages.values()))
     fidelity = str(payload.get("fidelity", "boundary")).strip().lower()
-    coupled_model = package_data.coupled_model if fidelity == "coupled" else None
-    representation = coupled_model.get("representation") if isinstance(coupled_model, dict) else None
-    frequencies = common_frequencies(packages, coupled=fidelity == "coupled")
+    frequencies = common_frequencies(packages, coupled=fidelity == "coupled", requested=payload.get("frequenciesHz"))
     if not frequencies:
         raise ValueError("Speaker package contains no frequencies supported by the selected microphone sweep.")
     raw_microphones = payload.get("microphones")
@@ -382,9 +380,7 @@ def _microphone_sweep(
         raise ValueError("Deploy microphone ids must be unique.")
 
     worker_key = _execution_worker_key(payload, solve_cache)
-    rom_coupled = representation == "parity_petrov_galerkin_rom"
-    if fidelity == "coupled" and not rom_coupled:
-        raise ValueError("Deploy Level 3 microphone sweep requires a parity-ROM package.")
+    rom_coupled = fidelity == "coupled"
     worker = workers.get(worker_key)
     if worker is None:
         worker = _worker(worker_key)

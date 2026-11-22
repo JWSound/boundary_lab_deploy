@@ -18,6 +18,23 @@ any breaking change explicitly while versions are 0.x. Once the public API is 1.
 use major versions for breaking changes. File-format and worker schema versions
 are separate contracts; preserve old supported fixtures and test round trips.
 
+## Scene frequency requests
+
+For a coupled field solve, pass `frequencyHz`. For a coupled microphone or
+transducer sweep, pass a list in `frequenciesHz`. A scene of continuous Level 3
+interiors accepts frequencies throughout the intersection of their exported
+bands, including the endpoints. With a discrete ROM present, every source uses
+the common discrete samples inside that band. Muted cabinets participate in
+this check because exterior pressure can excite them. Explicit requests outside
+the shared domain fail before BEAT solves. Omitting the sweep list uses common
+discrete samples, or the shared band endpoints and in-band fallback samples for
+a fully continuous scene.
+
+Level 1 uses the pattern descriptor to select delay-compensated complex pressure
+interpolation. Sampled patterns constrain the scene to their recorded
+frequencies. Level 2 uses the shared frequencies of the fixed boundary traces.
+A Level 3 package can therefore support different frequencies at each fidelity.
+
 ## Release procedure
 
 1. Open a release PR with matching version metadata, dependency pins and

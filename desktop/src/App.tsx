@@ -60,6 +60,7 @@ import {
   buildPackagePatternLookups,
   buildSourceInstance,
   computeMixedFieldFrame,
+  supportsScenePatternFrequency,
   computeMixedMicrophonePatternResponses,
   fieldFrameFromSpl,
   minimumSourceHeightM,
@@ -332,13 +333,11 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
     () => (JSON.parse(activeSourcePackageIdsKey) as string[]).map((id) => packageById.get(id)).filter(Boolean) as LoadedSpeakerPackage[],
     [activeSourcePackageIdsKey, packageById],
   );
-  const commonMinimumFrequencyHz = Math.max(...acousticPackages.map((item) => Math.min(...item.frequenciesHz)));
-  const commonMaximumFrequencyHz = Math.min(...acousticPackages.map((item) => Math.max(...item.frequenciesHz)));
   const sortedFrequencyIndices = useMemo(
     () => Array.from(frequenciesHz.keys())
-      .filter((index) => frequenciesHz[index] >= commonMinimumFrequencyHz && frequenciesHz[index] <= commonMaximumFrequencyHz)
+      .filter(index => supportsScenePatternFrequency(acousticPackages, frequenciesHz[index]))
       .sort((a, b) => frequenciesHz[a] - frequenciesHz[b]),
-    [commonMaximumFrequencyHz, commonMinimumFrequencyHz, pkg],
+    [acousticPackages, frequenciesHz],
   );
   const usableFrequencyIndices = sortedFrequencyIndices.length > 0
     ? sortedFrequencyIndices
@@ -359,8 +358,8 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
   );
   const selectedFrequencyHz = frequenciesHz[frequencyIndex];
   const patternLookups = useMemo(
-    () => buildPackagePatternLookups(acousticPackages, selectedFrequencyHz),
-    [acousticPackages, selectedFrequencyHz],
+    () => buildPackagePatternLookups(sortedFrequencyIndices.includes(frequencyIndex) ? acousticPackages : [], selectedFrequencyHz),
+    [acousticPackages, selectedFrequencyHz, sortedFrequencyIndices, frequencyIndex],
   );
   const selectedInstance = selectedInstances.at(-1) ?? null;
   const selectedSourceIndex = sourceConfigs.findIndex((source) => source.id === selectedInstance);
@@ -384,7 +383,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
   const selectedSourcePackage = selectedSource ? packageById.get(selectedSource.packageId) ?? pkg : pkg;
   const sourceMinimumHeightM = selectedSourcePackage ? minimumSourceHeightM(selectedSourcePackage) : 0;
   const observationAcousticKey = JSON.stringify(audiencePlanes.map(p => ({ id: p.id, ...observationAcousticState(p) })));
-  const patternFields = useMemo(() => Object.fromEntries(audiencePlanes.map(p => [p.id, sourceConfigs.length > 0
+  const patternFields = useMemo(() => Object.fromEntries(audiencePlanes.map(p => [p.id, patternLookups.size > 0 && sourceConfigs.length > 0
     ? computeMixedFieldFrame(packageById, patternLookups, sources, drivenSourceConfigs, p, selectedFrequencyHz)
     : emptyFieldFrame(p)])), [drivenSourceConfigs, packageById, patternLookups, sources, observationAcousticKey, selectedFrequencyHz]);
   const patternField = activePlane ? patternFields[activePlane.id] : emptyFieldFrame(defaultObservation);
