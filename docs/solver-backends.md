@@ -1,6 +1,6 @@
 # Solver backends
 
-Preferences (the top-right settings button) selects CPU, NVIDIA CUDA, AMD ROCm, or Apple Metal for Boundary and Coupled solves, microphone sweeps, and audience-plane updates. The choice is saved in `solver-preferences.json` under Electron's user-data directory, independently of projects. ROCm requires an engine candidate advertising Deploy ROCm support; the currently pinned 0.5.1 wheel does not provide this path. Metal requires an engine candidate with Deploy Metal support; see [macOS development](macos.md).
+Preferences (the top-right settings button) selects CPU, NVIDIA CUDA, AMD ROCm, or Apple Metal for Boundary and Coupled solves, microphone sweeps, and audience-plane updates. The choice is saved in `solver-preferences.json` under Electron's user-data directory, independently of projects. The pinned engine advertises Deploy ROCm support. ROCm solves also require a functional device and the staged ROCm environment. Metal requires a functional Metal device and engine support; see [macOS development](macos.md).
 
 On first launch, Deploy probes the native accelerator's versioned worker handshake: Metal on Apple Silicon, CUDA then ROCm on Windows/Linux, CPU on Intel Macs. Metal and ROCm must advertise Deploy solver support as well as a functional device and required solver libraries. Unavailable accelerators fall back to CPU. Later launches retain the saved choice. Selecting a backend is disabled during a running solve or sweep. Switching backends invalidates the desktop result identity and uses the corresponding engine worker.
 

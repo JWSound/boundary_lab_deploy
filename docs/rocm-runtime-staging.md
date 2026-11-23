@@ -45,16 +45,14 @@ The later [candidate runtime qualification](rocm-candidate-runtime.md) passes
 relocated Boundary/Coupled CPU/ROCm workflows with a locally built, hashed engine
 wheel. The original release-lock results below retain their narrower scope.
 
-The lock still selects BEAT v0.5.1. That wheel has a ROCm environment but lacks
+The staging run used BEAT v0.5.1. That wheel has a ROCm environment but lacks
 Deploy's native ROCm solve implementation. These checks establish runtime staging,
 relocated CPU execution and basic offline AMD dependency/compute operation on
 this host. They do not qualify Deploy Boundary/Coupled ROCm workflows in an
 installed application, every AMD GPU, or an AMD release.
 
-A qualified immutable engine artifact containing the Deploy ROCm implementation,
-a separate release-pin update, and full relocated/installed CPU–ROCm numerical
-qualification remain required. No release pin was changed and no installer was
-installed or published by this work.
+The current runtime lock pins BEAT v0.10.0. Installed CPU and ROCm workflow
+qualification for this pin is separate from the staging results above.
 
 Local evidence is under `runs/` in the staging worktree:
 `rocm-runtime-build-r2.log`, `rocm-relocation-cpu.log`,
