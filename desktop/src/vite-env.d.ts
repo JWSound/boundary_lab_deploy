@@ -57,6 +57,7 @@ interface DesktopSolveStatus {
 }
 
 interface DesktopMicrophoneSweepRequest {
+  frequenciesHz?: number[];
   packagePath: string;
   packagePaths?: Record<string, string>;
   backend: "cuda" | "cpu" | "metal" | "rocm";

@@ -312,6 +312,7 @@ def test_solve_reuse_validates_physics_and_invalidates_failed_jobs(tmp_path, mon
     package.write_bytes(b"package")
     payload = {"packagePath": str(package), "fidelity": "coupled", "frequencyHz": 40,
                "sources": [{"levelDb": 0}], "solutionKey": "same-renderer-key"}
+    monkeypatch.setattr(deploy_worker, "scene_packages", lambda *_: {})
     monkeypatch.setattr(deploy_worker, "_execution_worker_key", lambda *_: "cuda")
     monkeypatch.setattr(deploy_worker, "_emit", lambda *a, **k: {"json_encode_s": 0, "stdout_bytes": 0})
     def prepare(payload, directory, **kwargs):
@@ -511,3 +512,9 @@ def test_rocm_detection_requires_deploy_support_and_functional_runtime(monkeypat
     if not supported:
         with pytest.raises(RuntimeError, match="does not support Deploy ROCm"):
             deploy_worker._check_backend_capability(deploy_worker._worker("rocm"), "rocm")
+
+@pytest.mark.parametrize("versions,expected", [([], False), ([1], True), ([2], False)])
+def test_native_continuous_rom_negotiates_worker_version(versions, expected):
+    worker = SimpleNamespace(ensure_started=lambda: None, worker_info={"deploy_continuous_rom_versions": versions})
+    package = SimpleNamespace(coupled_model={"representation": "continuous_speaker_rom"})
+    assert deploy_worker._native_continuous_rom(worker, {"cabinet": package}) is expected

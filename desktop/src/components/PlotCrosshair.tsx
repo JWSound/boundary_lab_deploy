@@ -2,14 +2,14 @@ import { useEffect, useRef, useState, type PointerEvent } from "react";
 
 interface Axes {
   width: number; height: number; left: number; right: number; top: number; bottom: number;
-  minimum: number; maximum: number; frequencyMaximum: number; identity: string;
+  minimum: number; maximum: number; frequencyMinimum?: number; frequencyMaximum: number; identity: string;
 }
 
 export function crosshairCoordinates(axes: Axes, x: number, y: number) {
   const horizontal = Math.max(0, Math.min(1, (x - axes.left) / (axes.right - axes.left)));
   const vertical = Math.max(0, Math.min(1, (y - axes.top) / (axes.bottom - axes.top)));
   return {
-    frequency: 20 * (axes.frequencyMaximum / 20) ** horizontal,
+    frequency: (axes.frequencyMinimum ?? 20) * (axes.frequencyMaximum / (axes.frequencyMinimum ?? 20)) ** horizontal,
     value: axes.maximum - vertical * (axes.maximum - axes.minimum),
   };
 }
@@ -33,7 +33,7 @@ export function usePlotCrosshair(axes: Axes) {
     pointer.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
-  const visible = point?.identity === axes.identity && point.frequency <= axes.frequencyMaximum
+  const visible = point?.identity === axes.identity && point.frequency >= (axes.frequencyMinimum ?? 20) && point.frequency <= axes.frequencyMaximum
     && point.value >= axes.minimum && point.value <= axes.maximum ? point : null;
   return {
     point: visible,
@@ -57,7 +57,7 @@ export function PlotCrosshair({ point, axes, secondary }: {
   point: { frequency: number; value: number } | null; axes: Axes; secondary?: boolean;
 }) {
   if (!point) return null;
-  const x = axes.left + Math.log(point.frequency / 20) / Math.log(axes.frequencyMaximum / 20) * (axes.right - axes.left);
+  const x = axes.left + Math.log(point.frequency / (axes.frequencyMinimum ?? 20)) / Math.log(axes.frequencyMaximum / (axes.frequencyMinimum ?? 20)) * (axes.right - axes.left);
   const fraction = (axes.maximum - point.value) / (axes.maximum - axes.minimum);
   const y = axes.top + fraction * (axes.bottom - axes.top);
   const labelY = Math.max(axes.top, Math.min(axes.bottom - 16, y - 8));

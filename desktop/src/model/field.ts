@@ -109,11 +109,36 @@ export function computeMicrophonePatternResponses(
   sources: SpeakerInstance[],
   configs: SourceConfiguration[],
   microphones: MicrophoneConfiguration[],
+  requestedFrequenciesHz?: readonly number[],
 ): MicrophoneResponseSet {
   return computeMixedMicrophonePatternResponses(
     new Map([[pkg.id, pkg]]), sources,
-    configs.map((config) => ({ ...config, packageId: pkg.id })), microphones,
+    configs.map((config) => ({ ...config, packageId: pkg.id })), microphones, requestedFrequenciesHz,
   );
+}
+
+function supportsPatternFrequency(pkg: LoadedSpeakerPackage, hz: number): boolean {
+  if (!Number.isFinite(hz) || hz <= 0) return false;
+  const grid = pkg.frequenciesHz;
+  if (pkg.manifest.files.patterns?.evaluator === "delay_compensated_linear_v1") {
+    return hz >= grid[0] && hz <= grid[grid.length - 1];
+  }
+  return grid.some(value => Math.abs(value - hz) <= Math.max(1e-4, hz * 1e-6));
+}
+
+export function supportsScenePatternFrequency(packages: readonly LoadedSpeakerPackage[], hz: number): boolean {
+  return packages.every(pkg => supportsPatternFrequency(pkg, hz));
+}
+
+export function scenePatternFrequencies(packages: readonly LoadedSpeakerPackage[], requested?: readonly number[]): number[] {
+  const discrete = packages.find(pkg => pkg.manifest.files.patterns?.evaluator !== "delay_compensated_linear_v1");
+  const candidates = requested ?? (discrete ? Array.from(discrete.frequenciesHz)
+    : packages.flatMap(pkg => Array.from(pkg.frequenciesHz)));
+  const supported = [...new Set(candidates)].filter(hz => supportsScenePatternFrequency(packages, hz));
+  if (requested && requested.some(hz => !supported.includes(hz))) {
+    throw new Error("Requested pattern frequency is outside the common scene frequency domain.");
+  }
+  return supported.sort((a, b) => a - b);
 }
 
 export function computeMixedMicrophonePatternResponses(
@@ -121,16 +146,14 @@ export function computeMixedMicrophonePatternResponses(
   sources: SpeakerInstance[],
   configs: SourceConfiguration[],
   microphones: MicrophoneConfiguration[],
+  requestedFrequenciesHz?: readonly number[],
 ): MicrophoneResponseSet {
   if (sources.length !== configs.length) throw new Error("Microphone responses require matching source instances and configurations.");
   const sourcePackages = configs.map((config) => packages.get(config.packageId)).filter(Boolean) as LoadedSpeakerPackage[];
-  const commonMinimum = Math.max(...sourcePackages.map((pkg) => Math.min(...pkg.frequenciesHz)));
-  const commonMaximum = Math.min(...sourcePackages.map((pkg) => Math.max(...pkg.frequenciesHz)));
-  const commonFrequencies = [...new Set(
-    sourcePackages.flatMap((pkg) => Array.from(pkg.frequenciesHz)),
-  )].filter((frequency) => frequency >= commonMinimum && frequency <= commonMaximum).sort((left, right) => left - right);
-  if (commonFrequencies.length === 0) throw new Error("Active speaker packages do not share an overlapping frequency range.");
+  const commonFrequencies = scenePatternFrequencies(sourcePackages, requestedFrequenciesHz);
   const frequenciesHz = Float64Array.from(commonFrequencies);
+  const brackets = new Map(Array.from(new Set(sourcePackages), pkg =>
+    [pkg, Array.from(frequenciesHz, f => frequencyBracket(pkg, f))] as const));
   const drives = new Map(configs.map(config => [config.id, Array.from(frequenciesHz, f => sourceDrive(config, f))]));
   const sourceData = microphones.map((microphone) => sources.flatMap((source, sourceIndex) => {
     const config = configs[sourceIndex];
@@ -156,7 +179,8 @@ export function computeMixedMicrophonePatternResponses(
           + packageDirection.z * pkg.directionsPackage[offset + 2];
         if (dot > bestDot) { bestDot = dot; directionIndex = index; }
       }
-      return { pkg, config, distance, directionIndex, referenceRadius: pkg.radiiM[directionIndex] };
+      return { pkg, config, distance, directionIndex, referenceRadius: pkg.radiiM[directionIndex],
+        excitationIndices: logicalExcitationIndices(pkg), brackets: brackets.get(pkg)! };
     });
   }));
   return {
@@ -169,8 +193,8 @@ export function computeMixedMicrophonePatternResponses(
         let totalReal = 0;
         let totalImag = 0;
         sourceData[microphoneIndex].forEach((sample) => {
-          const [lower, upper, mix] = frequencyBracket(sample.pkg, frequency);
-          const excitationIndices = logicalExcitationIndices(sample.pkg);
+          const [lower, upper, mix] = sample.brackets[frequencyOutputIndex];
+          const excitationIndices = sample.excitationIndices;
           const [lowerReal, lowerImag] = patternPressureSample(
             sample.pkg,
             lower,
@@ -183,8 +207,8 @@ export function computeMixedMicrophonePatternResponses(
             sample.directionIndex,
             excitationIndices,
           );
-          const sampleReal = lowerReal + (upperReal - lowerReal) * mix;
-          const sampleImag = lowerImag + (upperImag - lowerImag) * mix;
+          const [sampleReal, sampleImag] = interpolatePressure(sample.pkg, frequency, lower, upper, mix,
+            sample.referenceRadius, lowerReal, lowerImag, upperReal, upperImag);
           const wavenumber = (2 * Math.PI * frequency) / sample.pkg.manifest.medium.sound_speed_m_per_s;
           const [fieldReal, fieldImag] = propagatePattern(
             sampleReal, sampleImag, sample.referenceRadius, sample.distance, wavenumber,
@@ -400,19 +424,39 @@ export function buildPatternLookup(
   return { azimuthBins, elevationBins, real, imag, radius };
 }
 
+function interpolatePressure(pkg: LoadedSpeakerPackage, hz: number, lower: number, upper: number, mix: number,
+  radius: number, lr: number, li: number, ur: number, ui: number): [number, number] {
+  if (mix === 0) return [lr, li];
+  if (mix === 1) return [ur, ui];
+  const phasePerHz = 2 * Math.PI * radius / pkg.manifest.medium.sound_speed_m_per_s;
+  const a = phasePerHz * (pkg.frequenciesHz[lower] - hz);
+  const b = phasePerHz * (pkg.frequenciesHz[upper] - hz);
+  return [
+    (1 - mix) * (lr * Math.cos(a) - li * Math.sin(a)) + mix * (ur * Math.cos(b) - ui * Math.sin(b)),
+    (1 - mix) * (li * Math.cos(a) + lr * Math.sin(a)) + mix * (ui * Math.cos(b) + ur * Math.sin(b)),
+  ];
+}
+
 function frequencyBracket(pkg: LoadedSpeakerPackage, frequencyHz: number): [number, number, number] {
-  const ordered = Array.from(pkg.frequenciesHz.keys()).sort((a, b) => pkg.frequenciesHz[a] - pkg.frequenciesHz[b]);
-  if (frequencyHz <= pkg.frequenciesHz[ordered[0]]) return [ordered[0], ordered[0], 0];
-  const last = ordered.at(-1)!;
-  if (frequencyHz >= pkg.frequenciesHz[last]) return [last, last, 0];
-  for (let index = 1; index < ordered.length; index += 1) {
-    const upper = ordered[index];
-    if (pkg.frequenciesHz[upper] < frequencyHz) continue;
-    const lower = ordered[index - 1];
-    const span = pkg.frequenciesHz[upper] - pkg.frequenciesHz[lower];
-    return [lower, upper, span > 0 ? (frequencyHz - pkg.frequenciesHz[lower]) / span : 0];
+  if (pkg.manifest.files.patterns?.evaluator === "delay_compensated_linear_v1") {
+    const frequencies = pkg.frequenciesHz;
+    if (!Number.isFinite(frequencyHz) || frequencyHz < frequencies[0] || frequencyHz > frequencies[frequencies.length - 1]) {
+      throw new Error("Requested frequency lies outside the continuous pattern band.");
+    }
+    let left = 0;
+    let right = frequencies.length - 1;
+    while (right - left > 1) {
+      const middle = (left + right) >>> 1;
+      if (frequencies[middle] < frequencyHz) left = middle;
+      else right = middle;
+    }
+    if (frequencyHz === frequencies[left]) return [left, left, 0];
+    if (frequencyHz === frequencies[right]) return [right, right, 0];
+    return [left, right, (frequencyHz - frequencies[left]) / (frequencies[right] - frequencies[left])];
   }
-  return [last, last, 0];
+  const index = pkg.frequenciesHz.findIndex(value => Math.abs(value - frequencyHz) <= Math.max(1e-4, frequencyHz * 1e-6));
+  if (index < 0) throw new Error("Requested frequency lies outside the discrete pattern grid.");
+  return [index, index, 0];
 }
 
 export function buildInterpolatedPatternLookup(pkg: LoadedSpeakerPackage, frequencyHz: number): PatternLookup {
@@ -421,9 +465,8 @@ export function buildInterpolatedPatternLookup(pkg: LoadedSpeakerPackage, freque
   if (lowerIndex === upperIndex) return lower;
   const upper = buildPatternLookup(pkg, upperIndex);
   for (let index = 0; index < lower.real.length; index += 1) {
-    lower.real[index] += (upper.real[index] - lower.real[index]) * mix;
-    lower.imag[index] += (upper.imag[index] - lower.imag[index]) * mix;
-    lower.radius[index] += (upper.radius[index] - lower.radius[index]) * mix;
+    [lower.real[index], lower.imag[index]] = interpolatePressure(pkg, frequencyHz, lowerIndex, upperIndex, mix,
+      lower.radius[index], lower.real[index], lower.imag[index], upper.real[index], upper.imag[index]);
   }
   return lower;
 }
@@ -487,6 +530,7 @@ export function computeMixedFieldFrame(
     const config = configs[index];
     const pkg = packages.get(config.packageId);
     if (!pkg) throw new Error(`Source ${config.name} references a package that is not loaded.`);
+    if (!supportsPatternFrequency(pkg, frequencyHz)) throw new Error("Unsupported scene pattern frequency.");
     const lookup = lookups.get(config.packageId);
     if (!lookup) throw new Error(`Source ${config.name} has no pattern lookup for its package.`);
     const [driveReal, driveImag] = sourceDrive(config, frequencyHz);

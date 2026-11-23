@@ -1,4 +1,4 @@
-import { FrequencySlider } from "./FrequencySlider";
+import { FrequencySlider, type ContinuousControl } from "./FrequencySlider";
 import { Gauge, Square, Waves } from "lucide-react";
 import { useMemo, useState } from "react";
 import { driverTraceColor } from "./DriverExcursionPlot";
@@ -58,7 +58,7 @@ export function ElectricalPlot({
   view = "impedance",
   coupledSelected,
   currentFrequencyHz,
-  frequencyValues,
+  continuous, frequencyValues,
   frequencyPosition,
   frequencyCount,
   onFrequencyPositionChange,
@@ -72,6 +72,7 @@ export function ElectricalPlot({
   view?: ElectricalView;
   coupledSelected: boolean;
   currentFrequencyHz: number;
+  continuous?: ContinuousControl;
   frequencyValues: readonly number[];
   frequencyPosition: number;
   frequencyCount: number;
@@ -82,7 +83,9 @@ export function ElectricalPlot({
   totalCount: number;
   onCalculateOrStop: () => void;
 }) {
-  const [frequencyMaximum, setFrequencyMaximum] = useState<2000 | 20000>(2000);
+  const [axisMaximum, setFrequencyMaximum] = useState<2000 | 20000>(2000);
+  const frequencyMinimum = continuous?.range[0] ?? FREQUENCY_MINIMUM_HZ;
+  const frequencyMaximum = continuous?.range[1] ?? axisMaximum;
   const [acousticPart, setAcousticPart] = useState<"resistance" | "reactance">("resistance");
   const [pressurePeak, setPressurePeak] = useState(false);
   const [pressureKpa, setPressureKpa] = useState(false);
@@ -97,7 +100,7 @@ export function ElectricalPlot({
   const padding = { left: 55, right: view === "impedance" ? 55 : 24, top: loadingView ? 55 : 13, bottom: 34 };
   const plotRight = Math.max(padding.left + 1, width - padding.right);
   const plotBottom = Math.max(padding.top + 1, height - padding.bottom);
-  const logMinimum = Math.log10(FREQUENCY_MINIMUM_HZ);
+  const logMinimum = Math.log10(frequencyMinimum);
   const logRange = Math.log10(frequencyMaximum) - logMinimum;
   const x = (frequency: number) => padding.left + ((Math.log10(frequency) - logMinimum) / logRange) * (plotRight - padding.left);
   const limits = useMemo(() => {
@@ -112,13 +115,13 @@ export function ElectricalPlot({
   const y = (value: number) => padding.top + ((limits[1] - value) / (limits[1] - limits[0])) * (plotBottom - padding.top);
   const phaseY = (value: number) => padding.top + ((180 - value) / 360) * (plotBottom - padding.top);
   const axes = { width, height, left: padding.left, right: plotRight, top: padding.top, bottom: plotBottom,
-    minimum: limits[0], maximum: limits[1], frequencyMaximum, identity: `${view}:${acousticPart}:${pressurePeak}:${pressureKpa}` };
+    minimum: limits[0], maximum: limits[1], frequencyMinimum, frequencyMaximum, identity: `${view}:${acousticPart}:${pressurePeak}:${pressureKpa}` };
   const crosshair = usePlotCrosshair(axes);
   const path = (frequencies: Float64Array, values: Float32Array, ordinate: (value: number) => number) => {
     let result = "";
     let connected = false;
     for (let index = 0; index < Math.min(frequencies.length, values.length); index += 1) {
-      if (!Number.isFinite(values[index]) || !Number.isFinite(frequencies[index]) || frequencies[index] < FREQUENCY_MINIMUM_HZ || frequencies[index] > frequencyMaximum) { connected = false; continue; }
+      if (!Number.isFinite(values[index]) || !Number.isFinite(frequencies[index]) || frequencies[index] < frequencyMinimum || frequencies[index] > frequencyMaximum) { connected = false; continue; }
       result += `${connected ? " L" : " M"}${x(frequencies[index]).toFixed(2)},${ordinate(values[index]).toFixed(2)}`;
       connected = true;
     }
@@ -126,8 +129,8 @@ export function ElectricalPlot({
   };
   const yTicks = Array.from({ length: 5 }, (_, index) => limits[0] + (limits[1] - limits[0]) * index / 4);
   const phaseTicks = [-180, -90, 0, 90, 180];
-  const majorFrequencies = MAJOR_FREQUENCIES_HZ.filter((frequency) => frequency <= frequencyMaximum);
-  const cursorX = x(Math.max(FREQUENCY_MINIMUM_HZ, Math.min(frequencyMaximum, currentFrequencyHz)));
+  const majorFrequencies = MAJOR_FREQUENCIES_HZ.filter((frequency) => frequency >= frequencyMinimum && frequency <= frequencyMaximum);
+  const cursorX = x(Math.max(frequencyMinimum, Math.min(frequencyMaximum, currentFrequencyHz)));
   const unit = view === "differential" ? `|Δp| ${pressurePeak ? "peak" : "RMS"} (${pressureKpa ? "kPa" : "Pa"})` : view === "acoustic" ? `${acousticPart === "resistance" ? "R" : "X"} / (ρcSd)` : view === "impedance" ? "|Z| (ohm)" : view === "current" ? "RMS current (A)" : "Real input power (W)";
   const toggleTrace = (id: string) => setHiddenTraceIds((current) => {
     const next = new Set(current);
@@ -150,7 +153,7 @@ export function ElectricalPlot({
           <button className={acousticPart === "reactance" ? "active" : ""} onClick={() => setAcousticPart("reactance")}>Reactance</button>
         </> : <span>{view === "impedance" ? "Impedance" : view === "current" ? "RMS current" : "Real input power"}</span>}
       </div>
-      <FrequencySlider frequencyValues={frequencyValues} currentFrequencyHz={currentFrequencyHz} frequencyPosition={frequencyPosition}
+      <FrequencySlider continuous={continuous} frequencyValues={frequencyValues} currentFrequencyHz={currentFrequencyHz} frequencyPosition={frequencyPosition}
           frequencyCount={frequencyCount} onFrequencyPositionChange={onFrequencyPositionChange} />
       <button className={`bem-pressure-button ${calculating ? "stop" : ""}`} disabled={!calculating && !canCalculate} onClick={onCalculateOrStop}>
         {calculating ? <Square size={11} fill="currentColor" /> : <Waves size={12} />} {calculating ? `Stop ${completedCount}/${totalCount}` : "Calculate Coupled Sweep"}
@@ -164,7 +167,7 @@ export function ElectricalPlot({
             <svg ref={chartRef} {...crosshair.handlers} className="response-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${unit} per speaker over frequency. Drag for axis coordinates; double-click to clear.`}>
               <defs><clipPath id="electrical-plot-clip"><rect x={padding.left} y={padding.top} width={plotRight - padding.left} height={plotBottom - padding.top} /></clipPath></defs>
               <rect x={padding.left} y={padding.top} width={plotRight - padding.left} height={plotBottom - padding.top} className="plot-well" />
-              {minorFrequencyTicks(frequencyMaximum).map((tick) => <line key={`xm-${tick}`} x1={x(tick)} x2={x(tick)} y1={padding.top} y2={plotBottom} className="plot-grid minor" />)}
+              {minorFrequencyTicks(frequencyMaximum).filter(f => f >= frequencyMinimum).map((tick) => <line key={`xm-${tick}`} x1={x(tick)} x2={x(tick)} y1={padding.top} y2={plotBottom} className="plot-grid minor" />)}
               {yTicks.map((tick, index) => <g key={index}><line x1={padding.left} x2={plotRight} y1={y(tick)} y2={y(tick)} className="plot-grid major" /><text x={padding.left - 7} y={y(tick) + 3} textAnchor="end">{Math.abs(tick) < 0.1 ? tick.toFixed(3) : tick.toFixed(1)}</text></g>)}
               {majorFrequencies.map((tick) => <g key={tick}><line x1={x(tick)} x2={x(tick)} y1={padding.top} y2={plotBottom} className="plot-grid major" /><text x={x(tick)} y={height - 18} textAnchor="middle">{formatFrequency(tick)}</text></g>)}
               {view === "impedance" && phaseTicks.map((tick) => <text key={tick} x={plotRight + 7} y={phaseY(tick) + 3}>{tick}°</text>)}
@@ -172,7 +175,7 @@ export function ElectricalPlot({
               <text x={13} y={(padding.top + plotBottom) / 2} transform={`rotate(-90 13 ${(padding.top + plotBottom) / 2})`} textAnchor="middle" className="axis-title">{unit}</text>
               {view === "impedance" && <text x={width - 12} y={(padding.top + plotBottom) / 2} transform={`rotate(90 ${width - 12} ${(padding.top + plotBottom) / 2})`} textAnchor="middle" className="axis-title">Phase (deg)</text>}
               <g clipPath="url(#electrical-plot-clip)">
-                <line x1={cursorX} x2={cursorX} y1={padding.top} y2={plotBottom} className="frequency-cursor" />
+                {(!continuous || currentFrequencyHz >= frequencyMinimum && currentFrequencyHz <= frequencyMaximum) && <line x1={cursorX} x2={cursorX} y1={padding.top} y2={plotBottom} className="frequency-cursor" />}
                 {traces.map(([id, trace], index) => hiddenTraceIds.has(id) ? null : <path key={`${id}-${view}`} d={path(trace.frequenciesHz ?? data!.frequenciesHz, valuesFor(trace), y)} stroke={driverTraceColor(index)} className="bem-trace" />)}
                 {view === "impedance" && traces.map(([id, trace], index) => hiddenTraceIds.has(id) ? null : <path key={`${id}-phase`} d={path(trace.frequenciesHz ?? data!.frequenciesHz, trace.impedancePhaseDeg, phaseY)} stroke={driverTraceColor(index)} className="electrical-phase-trace" />)}
               </g>
@@ -181,7 +184,7 @@ export function ElectricalPlot({
             <div className="response-legend electrical-legend">
               {view === "impedance" && <em><b className="line-sample" />Magnitude <b className="line-sample phase" />Phase</em>}
             </div>
-            <button className="response-range-toggle" type="button" onClick={() => setFrequencyMaximum((current) => current === 2000 ? 20000 : 2000)}>20 Hz–{frequencyMaximum === 2000 ? "2 kHz" : "20 kHz"}</button>
+            {!continuous && <button className="response-range-toggle" type="button" onClick={() => setFrequencyMaximum((current) => current === 2000 ? 20000 : 2000)}>20 Hz–{frequencyMaximum === 2000 ? "2 kHz" : "20 kHz"}</button>}
             </div>
             <TraceVisibilityFilter items={traces.map(([id, trace], index) => ({ id, name: trace.name, color: driverTraceColor(index) }))} hiddenIds={hiddenTraceIds} onToggle={toggleTrace} />
           </div>}

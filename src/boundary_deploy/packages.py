@@ -40,14 +40,47 @@ def source_package(packages: dict[str, DeployPackageData], source: dict[str, Any
     return packages[""] if "" in packages else packages[str(source.get("packageId", ""))]
 
 
-def common_frequencies(packages: dict[str, DeployPackageData], *, coupled: bool) -> list[float]:
+ROM_REPRESENTATIONS = {"parity_petrov_galerkin_rom", "continuous_speaker_rom"}
+
+
+def common_frequencies(packages, *, coupled: bool, requested=None) -> list[float]:
+    """Resolve a requested sweep or a default sampling of the common scene domain."""
+    if not packages:
+        return []
     grids = []
+    lower, upper = 0.0, np.inf
     for package in packages.values():
-        grids.append(package.frequencies)
         if coupled:
             model = package.coupled_model
-            if not isinstance(model, dict) or model.get("representation") != "parity_petrov_galerkin_rom":
-                raise ValueError(f"Package {package.path.name} requires a parity Petrov–Galerkin ROM for Level 3.")
-            grids.append(np.asarray(model["arrays"]["frequencies_hz"]))
-    frequencies = sorted({float(v) for v in grids[0] if np.isfinite(v) and v > 0})
-    return [v for v in frequencies if all(np.any(np.abs(grid - v) <= max(1e-4, abs(v) * 1e-6)) for grid in grids)]
+            if not model or model.get("representation") not in ROM_REPRESENTATIONS:
+                raise ValueError(f"Package {package.path.name} requires a continuous or parity Petrov-Galerkin ROM.")
+            if model["representation"] == "continuous_speaker_rom":
+                lo, hi = model["frequency_band_hz"]
+                lower, upper = max(lower, lo), min(upper, hi)
+                continue
+            grids.extend((package.frequencies, np.asarray(model["arrays"]["frequencies_hz"])))
+        else:
+            grids.append(package.frequencies)
+    if requested is not None:
+        if not isinstance(requested, list) or not requested:
+            raise ValueError("Deploy frequenciesHz must be a non-empty array.")
+        candidates = [float(v) for v in requested]
+    elif grids:
+        candidates = grids[0]
+    else:
+        candidates = [lower, upper, *(v for package in packages.values() for v in package.frequencies)]
+    result = set()
+    for hz in candidates:
+        if grids and grids[0].size and np.isfinite(hz):
+            # Recover the exported value after a Float32 or JSON round trip.
+            closest = grids[0][np.argmin(np.abs(grids[0] - hz))]
+            if abs(closest - hz) <= max(1e-4, hz * 1e-6):
+                hz = closest
+        if not np.isfinite(hz) or hz <= 0 or not lower <= hz <= upper or any(
+            not np.any(np.abs(grid - hz) <= max(1e-4, hz * 1e-6)) for grid in grids
+        ):
+            if requested is not None:
+                raise ValueError(f"Frequency {hz:g} Hz is outside the common scene frequency domain.")
+            continue
+        result.add(float(hz))
+    return sorted(result)

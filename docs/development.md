@@ -18,6 +18,43 @@ any breaking change explicitly while versions are 0.x. Once the public API is 1.
 use major versions for breaking changes. File-format and worker schema versions
 are separate contracts; preserve old supported fixtures and test round trips.
 
+## Scene frequency requests
+
+In a continuous Pattern or Coupled scene, the lower and upper handles select the
+response plot and sweep limits. The arrow above the track selects the observation
+plane frequency anywhere in the common validated band. The project stores both
+selections. Preferences sets the sweep density in points per octave (default
+12). Sweeps include both limits and use equal logarithmic steps. Moving the
+plane arrow leaves the response samples intact.
+
+The active fidelity determines which package data is evaluated. Sampled Level 2
+traces and legacy ROMs use a single handle on the shared discrete grid.
+
+
+For a coupled field solve, pass `frequencyHz`. For a coupled microphone or
+transducer sweep, pass a list in `frequenciesHz`. A scene of continuous Level 3
+interiors accepts frequencies throughout the intersection of their exported
+bands, including the endpoints. With a discrete ROM present, every source uses
+the common discrete samples inside that band. Muted cabinets participate in
+this check because exterior pressure can excite them. Explicit requests outside
+the shared domain fail before BEAT solves. Omitting the sweep list uses common
+discrete samples, or the shared band endpoints and in-band fallback samples for
+a fully continuous scene.
+
+Deploy negotiates native continuous Level 3 support using the worker's
+`deploy_continuous_rom_versions` capability. Version 1 reads the verified model
+member directly from the package. Each worker shares one decoded model across
+its placements and retains up to 128 MiB of recently assembled CPU operators
+and factorizations. The active solve and compact models have separate memory
+requirements. Changing the frequency grid does not create a temporary binary
+sweep file for these packages. Workers without this capability receive staged
+operators. Discrete packages use their exported binary operators in both cases.
+
+Level 1 uses the pattern descriptor to select delay-compensated complex pressure
+interpolation. Sampled patterns constrain the scene to their recorded
+frequencies. Level 2 uses the shared frequencies of the fixed boundary traces.
+A Level 3 package can therefore support different frequencies at each fidelity.
+
 ## Release procedure
 
 1. Open a release PR with matching version metadata, dependency pins and

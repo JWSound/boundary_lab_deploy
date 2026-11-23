@@ -1,8 +1,11 @@
+import { sweepDensities } from "../model/frequencyDomain";
 import { useEffect, useRef } from "react";
 
-export function SolverPreferencesDialog({ backend, busy, interfaceScale, scaleBusy, onScaleChange, onChange, onClose }: {
+export function SolverPreferencesDialog({ density, onDensity, backend, busy, interfaceScale, scaleBusy, onScaleChange, onChange, onClose }: {
   backend: "cpu" | "cuda" | "metal" | "rocm" | null;
   busy: boolean;
+  density: number;
+  onDensity: (value: number) => void;
   interfaceScale: number;
   scaleBusy: boolean;
   onScaleChange?: (scale: number) => void;
@@ -20,6 +23,13 @@ export function SolverPreferencesDialog({ backend, busy, interfaceScale, scaleBu
       <select id="interface-scale" value={interfaceScale} disabled={scaleBusy || !onScaleChange}
         onChange={event => onScaleChange?.(Number(event.target.value))}>
         {[0.85, 0.9, 0.95, 1, 1.1].map(scale => <option key={scale} value={scale}>{Math.round(scale * 100)}%{scale === 0.9 ? " (default)" : ""}</option>)}
+      </select>
+    </section>
+    <section>
+      <h3>Continuous frequency sweeps</h3>
+      <label htmlFor="sweep-density">Points per octave</label>
+      <select id="sweep-density" value={density} onChange={event => onDensity(Number(event.target.value))}>
+        {sweepDensities.map(value => <option key={value} value={value}>{value}</option>)}
       </select>
     </section>
     <h3>Solver</h3>

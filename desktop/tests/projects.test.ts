@@ -75,3 +75,7 @@ assert.equal(parseDeployProject(serializeDeployProject({...project,audience_plan
 for(const invalid of [{...dense,columns:240},{...dense,pointsPerMeter:11},{...dense,pointsPerMeter:null},{...legacyPlane,columns:501,rows:500}]) {
   assert.throws(()=>parseDeployProject(JSON.stringify({...project,audience_planes:[{...invalid,id:'invalid-plane',name:'Invalid'}]})));
 }
+
+const rangedProject = { ...project, selected_frequency_hz: 162.25, sweep_range_hz: [90, 220] as [number, number] };
+assert.deepEqual(parseDeployProject(serializeDeployProject(rangedProject)), rangedProject);
+assert.throws(() => parseDeployProject(JSON.stringify({ ...project, sweep_range_hz: [80, 60] })), /sweep_range_hz/);

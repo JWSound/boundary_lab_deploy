@@ -1,4 +1,4 @@
-import { FrequencySlider } from "./FrequencySlider";
+import { FrequencySlider, type ContinuousControl } from "./FrequencySlider";
 import { Square, Waves } from "lucide-react";
 import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { MicrophoneResponseSet } from "../model/types";
@@ -48,7 +48,7 @@ export function MicrophoneResponsePlot({
   coupled,
   overlays = [],
   currentFrequencyHz,
-  frequencyValues,
+  continuous, frequencyValues,
   frequencyPosition,
   frequencyCount,
   onFrequencyPositionChange,
@@ -64,6 +64,7 @@ export function MicrophoneResponsePlot({
   coupled: BemResponseData | null;
   overlays?: MicrophoneOverlay[];
   currentFrequencyHz: number;
+  continuous?: ContinuousControl;
   frequencyValues: readonly number[];
   frequencyPosition: number;
   frequencyCount: number;
@@ -77,7 +78,9 @@ export function MicrophoneResponsePlot({
 }) {
   const { ref: chartRef, width, height } = usePlotDimensions();
   const padding = { left: 48, right: 86, top: 13, bottom: 34 };
-  const [frequencyMaximum, setFrequencyMaximum] = useState<2000 | 20000>(2000);
+  const [axisMaximum, setFrequencyMaximum] = useState<2000 | 20000>(2000);
+  const frequencyMinimum = continuous?.range[0] ?? AUDIO_FREQUENCY_MINIMUM_HZ;
+  const frequencyMaximum = continuous?.range[1] ?? axisMaximum;
   const [crosshair, setCrosshair] = useState<{ frequencyHz: number; splDb: number } | null>(null);
   const [crosshairDragging, setCrosshairDragging] = useState(false);
   const [hiddenTraceIds, setHiddenTraceIds] = useState<Set<string>>(() => new Set());
@@ -93,7 +96,7 @@ export function MicrophoneResponsePlot({
     const maximum = values.length ? Math.ceil(Math.max(...values) / 5) * 5 + 10 : 145;
     return [maximum - RESPONSE_DB_SPAN, maximum] as const;
   }, [bem, coupled, pattern, visibleMethods, overlays]);
-  const logMinimum = Math.log10(AUDIO_FREQUENCY_MINIMUM_HZ);
+  const logMinimum = Math.log10(frequencyMinimum);
   const logRange = Math.max(1e-9, Math.log10(frequencyMaximum) - logMinimum);
   const plotRight = Math.max(padding.left + 1, width - padding.right);
   const plotBottom = Math.max(padding.top + 1, height - padding.bottom);
@@ -124,9 +127,9 @@ export function MicrophoneResponsePlot({
     { length: Math.max(0, Math.floor((limits[1] - firstMinorY) / 5) + 1) },
     (_, index) => firstMinorY + index * 5,
   ).filter((tick) => tick % 10 !== 0);
-  const xMajorTicks = AUDIO_FREQUENCY_MAJOR_TICKS_HZ.filter((frequency) => frequency <= frequencyMaximum);
-  const xMinorTicks = logarithmicMinorTicks(frequencyMaximum);
-  const cursorX = x(Math.max(AUDIO_FREQUENCY_MINIMUM_HZ, Math.min(frequencyMaximum, currentFrequencyHz)));
+  const xMajorTicks = AUDIO_FREQUENCY_MAJOR_TICKS_HZ.filter((frequency) => frequency >= frequencyMinimum && frequency <= frequencyMaximum);
+  const xMinorTicks = logarithmicMinorTicks(frequencyMaximum).filter(f => f >= frequencyMinimum);
+  const cursorX = x(Math.max(frequencyMinimum, Math.min(frequencyMaximum, currentFrequencyHz)));
   const toggleTrace = (id: string) => setHiddenTraceIds((current) => {
     const next = new Set(current);
     if (next.has(id)) next.delete(id);
@@ -176,7 +179,7 @@ export function MicrophoneResponsePlot({
     <div className="microphone-response">
       <div className="response-toolbar">
         <div className="response-title"><Waves size={14} /><strong>Microphone response</strong></div>
-        <FrequencySlider frequencyValues={frequencyValues} currentFrequencyHz={currentFrequencyHz} frequencyPosition={frequencyPosition}
+        <FrequencySlider continuous={continuous} frequencyValues={frequencyValues} currentFrequencyHz={currentFrequencyHz} frequencyPosition={frequencyPosition}
           frequencyCount={frequencyCount} onFrequencyPositionChange={onFrequencyPositionChange} />
         <button
           className={`bem-pressure-button ${calculating ? "stop" : ""}`}
@@ -221,7 +224,7 @@ export function MicrophoneResponsePlot({
               ))}
               <text x={(padding.left + plotRight) / 2} y={height - 5} textAnchor="middle" className="axis-title">Frequency (Hz)</text>
               <g clipPath="url(#microphone-response-clip)">
-                <line x1={cursorX} x2={cursorX} y1={padding.top} y2={plotBottom} className="frequency-cursor" />
+                {(!continuous || currentFrequencyHz >= frequencyMinimum && currentFrequencyHz <= frequencyMaximum) && <line x1={cursorX} x2={cursorX} y1={padding.top} y2={plotBottom} className="frequency-cursor" />}
                 {visibleMethods.pattern && pattern.traces.flatMap((trace, index) => hiddenTraceIds.has(trace.microphoneId) ? [] : paths(pattern.frequenciesHz, trace.splDb).map((path, pathIndex) => (
                   <path key={`pattern-${trace.microphoneId}-${pathIndex}`} d={path} stroke={TRACE_COLORS[index % TRACE_COLORS.length]} className="pattern-trace" />
                 )))}
@@ -264,12 +267,12 @@ export function MicrophoneResponsePlot({
                 </label>;
               })}
             </div>
-            <button
+            {!continuous && <button
               className="response-range-toggle"
               type="button"
               title={`Switch frequency axis to 20 Hz–${frequencyMaximum === 2000 ? "20 kHz" : "2 kHz"}`}
               onClick={() => setFrequencyMaximum((current) => current === 2000 ? 20000 : 2000)}
-            >20 Hz–{frequencyMaximum === 2000 ? "2 kHz" : "20 kHz"}</button>
+            >20 Hz–{frequencyMaximum === 2000 ? "2 kHz" : "20 kHz"}</button>}
             </div>
             <TraceVisibilityFilter
               items={[...pattern.traces.map((trace, index) => ({ id: trace.microphoneId, name: trace.microphoneName, color: TRACE_COLORS[index % TRACE_COLORS.length] })), ...overlays.map((trace, index) => ({ id: trace.id, name: trace.name, color: TRACE_COLORS[(pattern.traces.length + index) % TRACE_COLORS.length] }))]}

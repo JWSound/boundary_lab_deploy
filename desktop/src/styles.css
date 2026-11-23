@@ -929,3 +929,15 @@ input[type="range"]::-webkit-slider-thumb {
 .solver-complexity { position: absolute; left: 12px; bottom: 12px; max-width: calc(100% - 24px); padding: 5px 8px; background: rgba(20, 25, 26, .88); color: #dce1e5; font-size: var(--text-caption); line-height: 1.5; pointer-events: none; font-variant-numeric: tabular-nums; }
 .viewport:has(.solver-complexity) .viewport-hint { display: none; }
 @container (max-width: 700px) { .viewport:has(.solver-complexity) .viewport-color-legend { bottom: 90px; } }
+
+.continuous-frequency { gap: 12px; }
+.frequency-readout { flex: 0 0 15ch; min-width: 0; display: grid; gap: 3px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.frequency-readout span + span { color: var(--text-muted); font-weight: normal; }
+.frequency-track { position: relative; flex: 1; height: 4px; margin: 8px 8px 0; background: #777; border-radius: 2px; }
+.frequency-track i { position: absolute; height: 100%; background: var(--accent); }
+.frequency-track input { position: absolute; left: -7px; top: -9px; width: calc(100% + 14px); pointer-events: none; }
+.frequency-track input::-webkit-slider-runnable-track { background: transparent; }
+.frequency-track input[type=range]::-webkit-slider-thumb { pointer-events: auto; cursor: ew-resize; }
+.frequency-track input.plane-thumb { top: -23px; }
+.frequency-track input.plane-thumb::-webkit-slider-thumb { clip-path: polygon(0 15%, 100% 15%, 50% 100%); border-radius: 0; background: var(--accent); }
+.frequency-track input:focus-visible::-webkit-slider-thumb { background: white; }
