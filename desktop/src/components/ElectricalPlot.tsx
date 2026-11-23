@@ -158,7 +158,7 @@ export function ElectricalPlot({
     </div>
     <div className="response-content">
       {!coupledSelected ? <div className="response-empty">Select Level 3 Coupled fidelity to calculate {view === "differential" ? "diaphragm pressure differential" : view === "acoustic" ? "acoustic loading" : "electrical response"}.</div>
-        : traces.length === 0 ? <div className="response-empty">{view === "differential" ? "Run a new coupled sweep to display force-equivalent diaphragm pressure differential. Valid transducer parameters and effective area are required. Select a speaker if the selection is empty." : view === "acoustic" ? "Run a coupled sweep to display normalized driver loading as frequencies are solved. A valid effective diaphragm area is required; select a speaker if the current selection is empty." : "Run the coupled frequency sweep to display each speaker object."}</div>
+        : traces.length === 0 ? <div className="response-empty">{view === "differential" ? "Run a new coupled sweep to display force-equivalent diaphragm pressure differential. Valid transducer parameters and effective area are required." : view === "acoustic" ? "Run a coupled sweep to display normalized driver loading as frequencies are solved. A valid effective diaphragm area is required." : "Run the coupled frequency sweep to display each speaker object."}</div>
           : <div className="response-plot-layout">
             <div className="response-plot-area">
             <svg ref={chartRef} {...crosshair.handlers} className="response-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${unit} per speaker over frequency. Drag for axis coordinates; double-click to clear.`}>

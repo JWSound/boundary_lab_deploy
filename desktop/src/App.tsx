@@ -189,14 +189,10 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
   const [acousticResponse, setAcousticResponse] = useState<ElectricalData | null>(null);
   const [analysisTab, setAnalysisTab] = useState<"microphones" | "speakers">("microphones");
   const [speakerQuantity, setSpeakerQuantity] = useState<"excursion" | "impedance" | "current" | "power" | "acoustic" | "differential">("excursion");
-  const [analysisSpeakerId, setAnalysisSpeakerId] = useState("all");
   const [captures, setCaptures] = useState<AnalysisCapture[]>([]);
   const [visibleCaptureIds, setVisibleCaptureIds] = useState<Set<string>>(() => new Set());
   const [captureName, setCaptureName] = useState("");
   const [rawSweeps, setRawSweeps] = useState<Partial<Record<"boundary" | "coupled", { key: string; result: MicrophoneSweepResult }>>>({});
-  useEffect(() => {
-    if (analysisSpeakerId !== "all" && analysisSpeakerId !== "selection" && !sourceConfigs.some((source) => source.id === analysisSpeakerId)) setAnalysisSpeakerId("all");
-  }, [analysisSpeakerId, sourceConfigs]);
   const [responseHistory, setResponseHistory] = useState<Partial<Record<Fidelity, BemResponseData>>>({});
   const [retainedExcursion, setRetainedExcursion] = useState<DriverExcursionData | null>(null);
   const [retainedElectrical, setRetainedElectrical] = useState<ElectricalData | null>(null);
@@ -474,8 +470,7 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
   const visibleCaptures = captures.filter((capture) => visibleCaptureIds.has(capture.id));
   const capturedMicrophones = microphoneOverlays(visibleCaptures);
   const speakerMatches = (id: string, driver: boolean) => {
-    const ids = analysisSpeakerId === "selection" ? selectedSourceIds : analysisSpeakerId === "all" ? null : [analysisSpeakerId];
-    return ids === null || ids.some((sourceId) => driver ? id.startsWith(`${sourceId}:`) : id === sourceId);
+    return selectedSourceIds.length === 0 || selectedSourceIds.some((sourceId) => driver ? id.startsWith(`${sourceId}:`) : id === sourceId);
   };
   const speakerExcursion: DriverExcursionData = {
     key: "comparison",
@@ -2327,11 +2322,6 @@ function ProjectWorkspace({ start, onProjects }: { start: ProjectStart; onProjec
                 <option value="power">Real input power</option>
                 <option value="acoustic">Acoustic loading</option>
                 <option value="differential">Diaphragm pressure differential</option>
-              </select>
-              <select aria-label="Speaker response subjects" value={analysisSpeakerId} onChange={(event) => setAnalysisSpeakerId(event.target.value)}>
-                <option value="all">All Speakers</option>
-                <option value="selection">Selection</option>
-                {sourceConfigs.map((source) => <option key={source.id} value={source.id}>{source.name}</option>)}
               </select>
             </div>}
             {analysisTab === "microphones" ? <MicrophoneResponsePlot
