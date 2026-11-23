@@ -4,7 +4,7 @@ Deploy's Metal path targets Apple Silicon with macOS 14 or newer, native ARM64
 Python 3.11+, and Julia 1.12. Node/npm are needed to build the Electron desktop.
 Intel Macs can use CPU; they are not a Metal target.
 
-The published BEAT 0.5.1 wheel supports Deploy Metal and is SHA-256 pinned in
+The published BEAT 0.10.0 wheel supports Deploy Metal and is SHA-256 pinned in
 both `pyproject.toml` and `packaging/runtime-lock.json`. Automatic selection uses
 Metal only when the device is functional and the engine advertises Deploy Metal
 support; otherwise it falls back to CPU.
@@ -90,14 +90,11 @@ test artifact**, not a notarized public release. Gatekeeper may block a download
 copy. Do not disable Gatekeeper globally. Intel macOS packaging is not included.
 
 For prepublication engine qualification, `build_runtime_macos.py --engine-wheel
-build/engine-hotfix/beat_engine-0.5.1-py3-none-any.whl` uses a local copy only if
+build/engine-hotfix/beat_engine-0.10.0-py3-none-any.whl` uses a local copy only if
 its filename and SHA-256 exactly match the release pin. Deploy's development
 environment can install the same wheel with `pip install --no-deps <wheel>`.
-The pinned GitHub URL provides the published 0.5.1 wheel for clean CI and normal
-source installs. This release includes the Metal initialization fix and intervening
-Deploy CUDA changes from engine main. It makes Metal imports mandatory
-for the Metal engine bundle and checks live worker/device availability before
-accepting a Metal solve. A new runtime ID isolates caches from older bundles.
+The pinned GitHub URL supplies the same wheel for clean CI and source installs.
+A new runtime ID isolates caches from older bundles.
 
 The installer test mounts the DMG read-only, copies the app into a fresh path
 containing spaces, unmounts the image, and launches the packaged renderer and
